@@ -13,9 +13,14 @@ The project uses a three-piece architecture so it can scale without introducing 
 - `src/main.js`: static entrypoint loaded by `index.html`
 - `src/runtime/startApp.js`: starts UI and engine, wires persistence, exposes debug handle
 - `src/runtime/persistence.js`: storage adapter for versioned save snapshots
-- `src/engine/gameEngine.js`: game state + business rules + save/load boundaries
+- `src/engine/gameEngine.js`: orchestration layer and action API
 - `src/engine/random.js`: deterministic RNG controller (seeded or system mode)
 - `src/engine/config.js`: tunable simulation constants and content lists
+- `src/engine/staffEngine.js`: staffing, rotas, fatigue, injuries/disputes, staff stats
+- `src/engine/inventoryEngine.js`: supply quality/freshness, spoilage, production quality context
+- `src/engine/patronEngine.js`: patron generation, cohort loyalty, loyalty demand factor
+- `src/engine/eventEngine.js`: daily random event generation and effects
+- `src/engine/economyEngine.js`: pricing demand curve and inventory sale helpers
 - `src/ui/gameUI.js`: button bindings and panel rendering
 
 ## Layer Boundaries
@@ -30,8 +35,9 @@ The project uses a three-piece architecture so it can scale without introducing 
 - Keep balancing constants centralized near engine module top.
 - Seeded RNG support is now available for reproducible balancing.
 - Save/load serialization boundaries now use a versioned snapshot schema (`SAVE_SCHEMA_VERSION`).
+- Domain module split is now in place for staff, inventory, patrons, events, and economy.
 - Next split target: move large content lists (events, cohorts, items) into `src/content/` JSON modules.
-- Next split target: break `gameEngine.js` into domain modules (`staff`, `inventory`, `patrons`, `events`, `economy`).
+- Next split target: add scenario fixtures and deterministic regression harnesses.
 
 ## Persistence Contract
 

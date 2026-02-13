@@ -1,16 +1,38 @@
 import { createRandomController } from "./random.js";
 import {
   DAY_NAMES,
-  ROLE_TEMPLATES,
   PRICE_DEFAULTS,
   ROTA_PRESETS,
-  ROLE_SHIFT_BIAS,
-  COHORT_PROFILES,
-  PRODUCT_LABELS,
-  PATRON_FIRST_NAMES,
-  PATRON_LAST_NAMES,
-  SUPPLY_META
+  COHORT_PROFILES
 } from "./config.js";
+import {
+  createStaff as createStaffModel,
+  isStaffUnavailable,
+  getStaffStats as getStaffStatsModel,
+  progressStaffAbsences as progressStaffAbsencesModel,
+  assignDailyShifts as assignDailyShiftsModel,
+  applyEndOfDayStaffEffects as applyEndOfDayStaffEffectsModel
+} from "./staffEngine.js";
+import {
+  SUPPLY_META,
+  createSupplyStats as createSupplyStatsModel,
+  isSupplyItem,
+  qualityTier,
+  evaluateIngredientBlend as evaluateIngredientBlendModel,
+  getProductionQualityContext as getProductionQualityContextModel,
+  resetProductionQualityContext as resetProductionQualityContextModel,
+  applySupplySpoilage as applySupplySpoilageModel
+} from "./inventoryEngine.js";
+import {
+  createPatronPool as createPatronPoolModel,
+  getLoyaltyDemandMultiplier as getLoyaltyDemandMultiplierModel,
+  updatePatronLoyalty as updatePatronLoyaltyModel
+} from "./patronEngine.js";
+import { rollDailyEvent as rollDailyEventModel } from "./eventEngine.js";
+import {
+  demandByPrice as demandByPriceModel,
+  sellFromInventory as sellFromInventoryModel
+} from "./economyEngine.js";
 
 const SAVE_SCHEMA_VERSION = 1;
 
@@ -92,83 +114,24 @@ let initialized = false;
   }
 
   function createStaff(role) {
-    const tpl = ROLE_TEMPLATES[role];
-    return {
-      id: `${role}-${random.randomId(6)}`,
-      role,
-      wage: tpl.wage + randInt(-1, 2),
-      service: clamp(tpl.service + randInt(-3, 3), 4, 25),
-      quality: clamp(tpl.quality + randInt(-2, 3), 1, 20),
-      morale: randInt(52, 76),
-      fatigue: randInt(18, 34),
-      injuryDays: 0,
-      disputeDays: 0,
-      assignedShift: "day"
-    };
+    return createStaffModel(role, {
+      randomId: (length) => random.randomId(length),
+      randInt,
+      clamp
+    });
   }
 
   function createSupplyStats() {
-    const stats = {};
-    for (const item in SUPPLY_META) {
-      stats[item] = {
-        quality: clamp(SUPPLY_META[item].baseQuality + randInt(-8, 8), 35, 95),
-        freshness: randInt(62, 86)
-      };
-    }
-    return stats;
-  }
-
-  function isSupplyItem(item) {
-    return Boolean(SUPPLY_META[item]);
-  }
-
-  function qualityTier(quality) {
-    if (quality >= 78) {
-      return "Premium";
-    }
-    if (quality >= 64) {
-      return "Fine";
-    }
-    if (quality >= 48) {
-      return "Standard";
-    }
-    return "Poor";
+    return createSupplyStatsModel({ randInt, clamp });
   }
 
   function createPatronPool(count) {
-    const pool = [];
-    for (let i = 0; i < count; i += 1) {
-      pool.push(createPatron(i));
-    }
-    return pool;
-  }
-
-  function createPatron(index) {
-    const cohort = pickWeightedCohort();
-    const profile = COHORT_PROFILES[cohort];
-    const first = PATRON_FIRST_NAMES[randInt(0, PATRON_FIRST_NAMES.length - 1)];
-    const last = PATRON_LAST_NAMES[randInt(0, PATRON_LAST_NAMES.length - 1)];
-    const preference = pick(profile.preferredProducts);
-    return {
-      id: `patron-${index}-${random.randomId(5)}`,
-      name: `${first} ${last}`,
-      cohort,
-      preference,
-      loyalty: randInt(36, 64),
-      visits: 0
-    };
-  }
-
-  function pickWeightedCohort() {
-    const roll = random.nextFloat();
-    let threshold = 0;
-    for (const cohort in COHORT_PROFILES) {
-      threshold += COHORT_PROFILES[cohort].weight;
-      if (roll <= threshold) {
-        return cohort;
-      }
-    }
-    return "locals";
+    return createPatronPoolModel(count, {
+      randInt,
+      pick,
+      randomId: (length) => random.randomId(length),
+      randomFloat: () => random.nextFloat()
+    });
   }
 
   function setRotaPreset(preset) {
@@ -361,206 +324,47 @@ function repairTavern() {
   render();
 }
 
-  function isStaffUnavailable(person) {
-    return person.injuryDays > 0 || person.disputeDays > 0;
-  }
-
   function evaluateIngredientBlend(consumes) {
-    let qualityTotal = 0;
-    let freshnessTotal = 0;
-    let weight = 0;
-    for (const item in consumes) {
-      if (!isSupplyItem(item)) {
-        continue;
-      }
-      const amount = consumes[item];
-      qualityTotal += state.supplyStats[item].quality * amount;
-      freshnessTotal += state.supplyStats[item].freshness * amount;
-      weight += amount;
-    }
-
-    const avgQuality = weight === 0 ? 60 : qualityTotal / weight;
-    const avgFreshness = weight === 0 ? 70 : freshnessTotal / weight;
-    const score = avgQuality * 0.62 + avgFreshness * 0.38;
-    return {
-      avgQuality,
-      avgFreshness,
-      score,
-      outputMult: clamp(1 + (score - 60) / 230, 0.82, 1.12)
-    };
+    return evaluateIngredientBlendModel(consumes, state.supplyStats, { clamp });
   }
 
   function getProductionQualityContext() {
-    if (state.productionBatches === 0) {
-      return { score: 60, boost: 0 };
-    }
-    const score = state.productionQualitySum / state.productionBatches;
-    return {
-      score,
-      boost: Math.round((score - 60) / 7)
-    };
+    return getProductionQualityContextModel(state.productionQualitySum, state.productionBatches);
   }
 
   function resetProductionQualityContext() {
-    state.productionQualitySum = 0;
-    state.productionBatches = 0;
+    resetProductionQualityContextModel(state);
   }
 
   function applySupplySpoilage() {
-    const spoiled = [];
-    for (const item in SUPPLY_META) {
-      const quantity = state.inventory[item];
-      if (quantity <= 0) {
-        continue;
-      }
-
-      const meta = SUPPLY_META[item];
-      const hygienePenalty = item === "meat" || item === "veg" || item === "bread"
-        ? Math.max(0, Math.floor((52 - state.cleanliness) / 12))
-        : 0;
-      const freshnessLoss = randInt(meta.lossMin, meta.lossMax) + hygienePenalty;
-      state.supplyStats[item].freshness = clamp(
-        state.supplyStats[item].freshness - freshnessLoss,
-        0,
-        100
-      );
-      state.supplyStats[item].quality = clamp(
-        state.supplyStats[item].quality - randInt(0, 2),
-        15,
-        100
-      );
-
-      if (meta.spoilAt < 0 || state.supplyStats[item].freshness >= meta.spoilAt) {
-        continue;
-      }
-      const freshnessGap = meta.spoilAt - state.supplyStats[item].freshness;
-      const spoilRate = 0.03 + freshnessGap / 120;
-      const lost = Math.min(quantity, Math.max(1, Math.floor(quantity * spoilRate)));
-      state.inventory[item] -= lost;
-      spoiled.push({ item, lost });
-    }
-
-    if (spoiled.length === 0) {
-      return "No ingredient spoilage today.";
-    }
-    const note = spoiled
-      .slice(0, 3)
-      .map((entry) => `${entry.item} -${entry.lost}`)
-      .join(", ");
-    return `Spoilage hit ${note}.`;
+    return applySupplySpoilageModel(state.inventory, state.supplyStats, state.cleanliness, {
+      randInt,
+      clamp
+    });
   }
 
   function progressStaffAbsences() {
-    let returnedCount = 0;
-    let injuredCount = 0;
-    let disputeCount = 0;
-    state.staff.forEach((person) => {
-      if (person.injuryDays > 0) {
-        person.injuryDays -= 1;
-        person.fatigue = clamp(person.fatigue - randInt(6, 11), 0, 100);
-        injuredCount += 1;
-        if (person.injuryDays === 0) {
-          returnedCount += 1;
-          logLine(`${person.role} returned from injury leave.`, "good");
-        }
-      }
-      if (person.disputeDays > 0) {
-        person.disputeDays -= 1;
-        person.fatigue = clamp(person.fatigue - randInt(4, 8), 0, 100);
-        person.morale = clamp(person.morale + 2, 0, 100);
-        disputeCount += 1;
-        if (person.disputeDays === 0) {
-          returnedCount += 1;
-          logLine(`${person.role} dispute settled and returned to duty.`, "good");
-        }
-      }
+    return progressStaffAbsencesModel(state.staff, {
+      clamp,
+      randInt,
+      logLine
     });
-    return { returnedCount, injuredCount, disputeCount };
   }
 
   function assignDailyShifts(weekday) {
-    const isWeekendRush = weekday === "Fri" || weekday === "Sat";
-    const demandNightShare = isWeekendRush ? 0.62 : 0.42;
-    const preset = ROTA_PRESETS[state.rotaPreset] || ROTA_PRESETS.balanced;
-    const availableStaff = state.staff.filter((person) => !isStaffUnavailable(person));
-    let dayAssigned = 0;
-    let nightAssigned = 0;
-
-    availableStaff.forEach((person) => {
-      const roleBias = ROLE_SHIFT_BIAS[person.role] || 0;
-      const nightChance = clamp(
-        preset.nightShare + roleBias + (isWeekendRush ? 0.04 : -0.03),
-        0.08,
-        0.92
-      );
-      person.assignedShift = random.nextFloat() < nightChance ? "night" : "day";
-      if (person.assignedShift === "night") {
-        nightAssigned += 1;
-      } else {
-        dayAssigned += 1;
-      }
+    return assignDailyShiftsModel(state.staff, weekday, state.rotaPreset, {
+      clamp,
+      randomFloat: () => random.nextFloat()
     });
-
-    const totalAssigned = dayAssigned + nightAssigned;
-    const nightShare = totalAssigned === 0 ? 0.5 : nightAssigned / totalAssigned;
-    const shiftFit = 1 - Math.abs(nightShare - demandNightShare);
-    return {
-      availableCount: totalAssigned,
-      injuredCount: state.staff.filter((person) => person.injuryDays > 0).length,
-      disputeCount: state.staff.filter((person) => person.disputeDays > 0).length,
-      dayAssigned,
-      nightAssigned,
-      shiftFit,
-      demandMult: clamp(0.86 + shiftFit * 0.25, 0.82, 1.09),
-      serviceMult: clamp(0.84 + shiftFit * 0.28, 0.8, 1.12),
-      busyShift: isWeekendRush ? "night" : "day",
-      summary:
-        totalAssigned === 0
-          ? "No staff available for rota."
-          : `Rota ${preset.label}: day ${dayAssigned}, night ${nightAssigned}.`
-    };
   }
 
   function applyEndOfDayStaffEffects(shiftContext, satisfaction, net) {
-    let newInjuries = 0;
-    let newDisputes = 0;
-    let fatigueTotal = 0;
-
-    state.staff.forEach((person) => {
-      if (isStaffUnavailable(person)) {
-        fatigueTotal += person.fatigue;
-        return;
-      }
-
-      const onBusyShift = person.assignedShift === shiftContext.busyShift;
-      const fatigueGain = onBusyShift ? randInt(7, 12) : randInt(3, 8);
-      const satisfactionRelief = satisfaction >= 0.68 ? 2 : 0;
-      person.fatigue = clamp(person.fatigue + fatigueGain - satisfactionRelief, 0, 100);
-      fatigueTotal += person.fatigue;
-
-      if (person.fatigue >= 84 && random.nextFloat() < 0.09) {
-        person.injuryDays = randInt(2, 4);
-        person.morale = clamp(person.morale - randInt(4, 8), 0, 100);
-        newInjuries += 1;
-        logLine(`${person.role} suffered a fatigue injury and is out for treatment.`, "bad");
-        return;
-      }
-
-      if (person.fatigue >= 76 && person.morale < 48 && random.nextFloat() < 0.12) {
-        person.disputeDays = randInt(1, 3);
-        person.morale = clamp(person.morale - randInt(3, 7), 0, 100);
-        newDisputes += 1;
-        logLine(`${person.role} entered a staff dispute and sat out duties.`, "bad");
-        return;
-      }
-
-      if (net > 0 && satisfaction > 0.67) {
-        person.morale = clamp(person.morale + 1, 0, 100);
-      }
+    return applyEndOfDayStaffEffectsModel(state.staff, shiftContext, satisfaction, net, {
+      clamp,
+      randInt,
+      randomFloat: () => random.nextFloat(),
+      logLine
     });
-
-    const avgFatigue = state.staff.length === 0 ? 0 : Math.round(fatigueTotal / state.staff.length);
-    return { newInjuries, newDisputes, avgFatigue };
   }
 
   function advanceDay() {
@@ -745,266 +549,38 @@ function repairTavern() {
   }
 
   function demandByPrice(item, baseline) {
-    const ratio = state.prices[item] / baseline;
-    if (ratio <= 1) {
-      return 1 + (1 - ratio) * 0.15;
-    }
-    return Math.max(0.6, 1 - (ratio - 1) * 0.25);
+    return demandByPriceModel(state.prices, item, baseline);
   }
 
   function sellFromInventory(item, wanted) {
-    const sold = Math.min(wanted, state.inventory[item]);
-    state.inventory[item] -= sold;
-    return sold;
+    return sellFromInventoryModel(state.inventory, item, wanted);
   }
 
   function getStaffStats() {
-    if (state.staff.length === 0) {
-      return {
-        service: 0,
-        quality: 0,
-        avgMorale: 0,
-        payroll: 0,
-        avgFatigue: 0,
-        activeCount: 0,
-        unavailableCount: 0
-      };
-    }
-    let service = 0;
-    let quality = 0;
-    let moraleTotal = 0;
-    let payroll = 0;
-    let fatigueTotal = 0;
-    let activeCount = 0;
-    let unavailableCount = 0;
-
-    state.staff.forEach((person) => {
-      moraleTotal += person.morale;
-      payroll += person.wage;
-      fatigueTotal += person.fatigue;
-      if (isStaffUnavailable(person)) {
-        unavailableCount += 1;
-        return;
-      }
-      const moraleScale = 0.75 + person.morale / 200;
-      const fatigueScale = clamp(1 - person.fatigue / 160, 0.45, 1);
-      service += person.service * moraleScale * fatigueScale;
-      quality += person.quality * moraleScale * fatigueScale;
-      activeCount += 1;
-    });
-
-    return {
-      service: Math.round(service),
-      quality: Math.round(quality),
-      avgMorale: moraleTotal / state.staff.length,
-      payroll,
-      avgFatigue: fatigueTotal / state.staff.length,
-      activeCount,
-      unavailableCount
-    };
-  }
-
-  function getPatronMoodSnapshot() {
-    const cohortTotals = {};
-    for (const cohort in COHORT_PROFILES) {
-      cohortTotals[cohort] = { sum: 0, count: 0 };
-    }
-
-    let allLoyalty = 0;
-    state.patrons.forEach((patron) => {
-      allLoyalty += patron.loyalty;
-      cohortTotals[patron.cohort].sum += patron.loyalty;
-      cohortTotals[patron.cohort].count += 1;
-    });
-
-    let topCohort = "locals";
-    let lowCohort = "locals";
-    let topLoyalty = -1;
-    let lowLoyalty = 101;
-    const cohortAverages = {};
-
-    for (const cohort in cohortTotals) {
-      const cohortData = cohortTotals[cohort];
-      const average = cohortData.count === 0 ? 50 : cohortData.sum / cohortData.count;
-      cohortAverages[cohort] = average;
-      if (average > topLoyalty) {
-        topLoyalty = average;
-        topCohort = cohort;
-      }
-      if (average < lowLoyalty) {
-        lowLoyalty = average;
-        lowCohort = cohort;
-      }
-    }
-
-    return {
-      avgLoyalty: state.patrons.length === 0 ? 50 : allLoyalty / state.patrons.length,
-      topCohort,
-      lowCohort,
-      cohortAverages
-    };
+    return getStaffStatsModel(state.staff, clamp);
   }
 
   function getLoyaltyDemandMultiplier() {
-    const snapshot = getPatronMoodSnapshot();
-    return clamp(0.86 + snapshot.avgLoyalty / 245, 0.88, 1.16);
-  }
-
-  function pickVisitingPatrons(visitorCount) {
-    const shuffled = state.patrons.slice();
-    for (let i = shuffled.length - 1; i > 0; i -= 1) {
-      const swapIndex = randInt(0, i);
-      const temp = shuffled[i];
-      shuffled[i] = shuffled[swapIndex];
-      shuffled[swapIndex] = temp;
-    }
-    return shuffled.slice(0, Math.min(visitorCount, shuffled.length));
+    return getLoyaltyDemandMultiplierModel(state.patrons, clamp);
   }
 
   function updatePatronLoyalty(dayStats) {
-    if (state.patrons.length === 0) {
-      return {
-        topCohort: "locals",
-        lowCohort: "locals",
-        topCohortLoyalty: 50,
-        lowCohortLoyalty: 50,
-        highlight: "No patron records are available yet."
-      };
-    }
-
-    const visitorCount =
-      dayStats.guests <= 0
-        ? 0
-        : Math.min(state.patrons.length, Math.max(5, Math.floor(dayStats.guests * 0.44)));
-    const visitors = pickVisitingPatrons(visitorCount);
-
-    let bestReaction = { patron: null, delta: -999 };
-    let worstReaction = { patron: null, delta: 999 };
-
-    visitors.forEach((patron) => {
-      const profile = COHORT_PROFILES[patron.cohort];
-      const wantedUnits = dayStats.wanted[patron.preference];
-      const soldUnits = dayStats.sold[patron.preference];
-      const fulfillment = wantedUnits <= 0 ? 1 : soldUnits / wantedUnits;
-      const stockDelta = (fulfillment - 0.7) * 2.3;
-
-      const priceRatio = state.prices[patron.preference] / PRICE_DEFAULTS[patron.preference];
-      const priceDelta =
-        priceRatio <= 1
-          ? (1 - priceRatio) * 0.35
-          : -(priceRatio - 1) * profile.priceSensitivity * 1.6;
-
-      const qualityDelta = (dayStats.qualityScore - profile.qualityNeed) / 34;
-      const noise = randInt(-4, 4) / 10;
-      const loyaltyDelta = clamp(stockDelta + priceDelta + qualityDelta + noise, -2.8, 2.8);
-
-      patron.loyalty = clamp(patron.loyalty + loyaltyDelta, 0, 100);
-      patron.visits += 1;
-
-      if (loyaltyDelta > bestReaction.delta) {
-        bestReaction = { patron, delta: loyaltyDelta };
-      }
-      if (loyaltyDelta < worstReaction.delta) {
-        worstReaction = { patron, delta: loyaltyDelta };
-      }
+    return updatePatronLoyaltyModel({
+      patrons: state.patrons,
+      dayStats,
+      prices: state.prices,
+      randInt,
+      clamp
     });
-
-    const mood = getPatronMoodSnapshot();
-    const topCohortLoyalty = Math.round(mood.cohortAverages[mood.topCohort]);
-    const lowCohortLoyalty = Math.round(mood.cohortAverages[mood.lowCohort]);
-
-    let highlight = "Patron sentiment stayed steady today.";
-    if (visitors.length === 0) {
-      highlight = "No guests arrived. Loyalty stayed unchanged.";
-    } else if (bestReaction.patron && bestReaction.delta >= 0.9) {
-      highlight = `${bestReaction.patron.name} (${COHORT_PROFILES[bestReaction.patron.cohort].label}) praised your ${PRODUCT_LABELS[bestReaction.patron.preference]}.`;
-    } else if (worstReaction.patron && worstReaction.delta <= -0.9) {
-      highlight = `${worstReaction.patron.name} (${COHORT_PROFILES[worstReaction.patron.cohort].label}) complained about your ${PRODUCT_LABELS[worstReaction.patron.preference]}.`;
-    }
-
-    return {
-      topCohort: mood.topCohort,
-      lowCohort: mood.lowCohort,
-      topCohortLoyalty,
-      lowCohortLoyalty,
-      highlight
-    };
   }
 
   function rollDailyEvent() {
-    const mods = {
-      demandMult: 1,
-      flatGuests: 0,
-      qualityBoost: 0,
-      reputation: 0,
-      expense: 0,
-      cleanliness: 0,
-      condition: 0
-    };
-
-    if (random.nextFloat() < 0.5) {
-      return mods;
-    }
-
-    const event = pick([
-      "traveling_bard",
-      "guild_inspector",
-      "bar_brawl",
-      "merchant_caravan",
-      "spoiled_cask",
-      "noble_visit",
-      "rainstorm"
-    ]);
-
-    switch (event) {
-      case "traveling_bard":
-        mods.demandMult *= 1.1;
-        mods.reputation += 1;
-        logLine("A traveling bard praised your tavern in the market.", "good");
-        break;
-      case "guild_inspector":
-        if (state.cleanliness < 45 || state.condition < 45) {
-          mods.expense += randInt(12, 28);
-          mods.reputation -= 1;
-          logLine("Guild inspector issued a fine for poor standards.", "bad");
-        } else {
-          mods.reputation += 1;
-          logLine("Guild inspector approved your books and hygiene.", "good");
-        }
-        break;
-      case "bar_brawl":
-        mods.demandMult *= 0.88;
-        mods.condition -= randInt(3, 7);
-        mods.cleanliness -= randInt(3, 7);
-        mods.reputation -= 1;
-        logLine("A bar brawl damaged furniture and scared customers.", "bad");
-        break;
-      case "merchant_caravan":
-        mods.flatGuests += randInt(12, 28);
-        mods.demandMult *= 1.07;
-        logLine("A merchant caravan arrived and flooded the commons.", "good");
-        break;
-      case "spoiled_cask":
-        const lostAle = Math.min(state.inventory.ale, randInt(6, 14));
-        state.inventory.ale -= lostAle;
-        mods.reputation -= 1;
-        logLine(`A spoiled cask forced you to dump ${lostAle} ale.`, "bad");
-        break;
-      case "noble_visit":
-        mods.demandMult *= 1.08;
-        mods.qualityBoost += 6;
-        mods.reputation += 2;
-        logLine("A minor noble dined here and spread favorable gossip.", "good");
-        break;
-      case "rainstorm":
-        mods.demandMult *= 0.86;
-        mods.cleanliness -= 3;
-        logLine("Heavy rain reduced traffic and left muddy floors.", "bad");
-        break;
-      default:
-        break;
-    }
-    return mods;
+    return rollDailyEventModel(state, {
+      randInt,
+      pick,
+      randomFloat: () => random.nextFloat(),
+      logLine
+    });
   }
 
 function render() {

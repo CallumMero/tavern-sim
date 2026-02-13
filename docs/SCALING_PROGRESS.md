@@ -36,12 +36,36 @@ Validation:
 - `node --check` on all runtime/engine/ui modules.
 - Headless smoke run: init, advance, save, seeded new game, reload snapshot.
 
+## 2026-02-13: Engine Domain Split
+
+Completed:
+
+- Split engine domains out of `src/engine/gameEngine.js`:
+  - `src/engine/staffEngine.js`
+  - `src/engine/inventoryEngine.js`
+  - `src/engine/patronEngine.js`
+  - `src/engine/eventEngine.js`
+  - `src/engine/economyEngine.js`
+- Rewired `gameEngine.js` to act as the orchestration/action surface while delegating domain logic.
+- Preserved runtime save/load + deterministic flow compatibility after split.
+- Updated architecture docs to reflect the new domain layout.
+
+Files:
+
+- `src/engine/gameEngine.js`
+- `src/engine/staffEngine.js`
+- `src/engine/inventoryEngine.js`
+- `src/engine/patronEngine.js`
+- `src/engine/eventEngine.js`
+- `src/engine/economyEngine.js`
+- `docs/ARCHITECTURE.md`
+
+Validation:
+
+- `node --check` across all engine/runtime/ui modules.
+- Headless smoke run: init, advance day, save snapshot, seeded new game, reload snapshot.
+
 ## Next Work Items
 
-- Split `src/engine/gameEngine.js` into domain modules:
-  - `staffEngine.js`
-  - `inventoryEngine.js`
-  - `patronEngine.js`
-  - `eventEngine.js`
-  - `economyEngine.js`
 - Add scenario fixtures and deterministic regression runs.
+- Move large static content payloads into dedicated `src/content/` modules.

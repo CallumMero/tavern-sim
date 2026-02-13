@@ -13,7 +13,7 @@ No build step is required.
 The codebase is split into three layers:
 
 - `src/runtime/` controls app startup and environment wiring
-- `src/engine/` contains simulation state, deterministic RNG, and game logic
+- `src/engine/` contains simulation state, deterministic RNG, and domain logic modules
 - `src/ui/` owns DOM bindings and rendering
 
 Entry point: `src/main.js`
