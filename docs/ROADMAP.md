@@ -28,10 +28,12 @@ Build a management simulator with the depth cadence of Football Manager:
 
 ### Milestone 1: Simulation Depth
 
-- Add named patrons and cohorts with preferences and loyalty
-- Add shifts/rotas and staff fatigue, injuries, and disputes
-- Introduce ingredient quality tiers and spoilage windows
-- Add short reports: finance, operations, guest sentiment
+- [x] Add named patrons and cohorts with preferences and loyalty
+- [x] Add shifts/rotas and staff fatigue, injuries, and disputes
+- [x] Introduce ingredient quality tiers and spoilage windows
+- [x] Add short reports: finance, operations, guest sentiment
+
+Status: Completed on February 13, 2026 with the current browser playable slice.
 
 ### Milestone 2: World Layer
 

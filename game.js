@@ -16,6 +16,19 @@
     room: 16
   };
 
+  const ROTA_PRESETS = {
+    balanced: { label: "Balanced", nightShare: 0.5 },
+    day_heavy: { label: "Day Heavy", nightShare: 0.35 },
+    night_heavy: { label: "Night Heavy", nightShare: 0.65 }
+  };
+
+  const ROLE_SHIFT_BIAS = {
+    server: 0.06,
+    cook: -0.12,
+    barkeep: 0.22,
+    guard: 0.28
+  };
+
   const COHORT_PROFILES = {
     locals: {
       label: "Locals",
@@ -109,6 +122,16 @@
     "Yew"
   ];
 
+  const SUPPLY_META = {
+    grain: { label: "Grain", baseQuality: 60, qualityVariance: 14, lossMin: 2, lossMax: 4, spoilAt: 18 },
+    hops: { label: "Hops", baseQuality: 62, qualityVariance: 13, lossMin: 2, lossMax: 5, spoilAt: 20 },
+    honey: { label: "Honey", baseQuality: 66, qualityVariance: 10, lossMin: 1, lossMax: 2, spoilAt: 8 },
+    meat: { label: "Meat", baseQuality: 58, qualityVariance: 16, lossMin: 5, lossMax: 9, spoilAt: 38 },
+    veg: { label: "Veg", baseQuality: 61, qualityVariance: 14, lossMin: 4, lossMax: 8, spoilAt: 34 },
+    bread: { label: "Bread", baseQuality: 63, qualityVariance: 12, lossMin: 5, lossMax: 8, spoilAt: 40 },
+    wood: { label: "Wood", baseQuality: 72, qualityVariance: 8, lossMin: 0, lossMax: 1, spoilAt: -1 }
+  };
+
   const state = {
     day: 1,
     gold: 260,
@@ -133,6 +156,10 @@
       veg: 16,
       wood: 18
     },
+    supplyStats: createSupplyStats(),
+    rotaPreset: "balanced",
+    productionQualitySum: 0,
+    productionBatches: 0,
     prices: { ...PRICE_DEFAULTS },
     staff: [
       createStaff("barkeep"),
@@ -146,7 +173,11 @@
       lowCohort: "locals",
       topCohortLoyalty: 50,
       lowCohortLoyalty: 50,
-      highlight: "The regular crowd is settling in."
+      highlight: "The regular crowd is settling in.",
+      staffing: "Rota steady. No absences.",
+      supplies: "Supply freshness is stable.",
+      kitchen: 60,
+      satisfaction: 64
     },
     log: []
   };
@@ -164,6 +195,7 @@
   logLine("Tavern charter signed. Trade can now begin.", "neutral");
   logLine("Tip: keep ale and stew stocked before Fridays and Saturdays.", "neutral");
   logLine("Tip: loyal patrons boost future demand. Watch the daily report.", "neutral");
+  logLine("Tip: fatigue builds over time. Use rota presets to protect your staff.", "neutral");
   render();
 
   function byId(id) {
@@ -195,8 +227,40 @@
       wage: tpl.wage + randInt(-1, 2),
       service: clamp(tpl.service + randInt(-3, 3), 4, 25),
       quality: clamp(tpl.quality + randInt(-2, 3), 1, 20),
-      morale: randInt(52, 76)
+      morale: randInt(52, 76),
+      fatigue: randInt(18, 34),
+      injuryDays: 0,
+      disputeDays: 0,
+      assignedShift: "day"
     };
+  }
+
+  function createSupplyStats() {
+    const stats = {};
+    for (const item in SUPPLY_META) {
+      stats[item] = {
+        quality: clamp(SUPPLY_META[item].baseQuality + randInt(-8, 8), 35, 95),
+        freshness: randInt(62, 86)
+      };
+    }
+    return stats;
+  }
+
+  function isSupplyItem(item) {
+    return Boolean(SUPPLY_META[item]);
+  }
+
+  function qualityTier(quality) {
+    if (quality >= 78) {
+      return "Premium";
+    }
+    if (quality >= 64) {
+      return "Fine";
+    }
+    if (quality >= 48) {
+      return "Standard";
+    }
+    return "Poor";
   }
 
   function createPatronPool(count) {
@@ -298,6 +362,9 @@
     byId("hireCookBtn").addEventListener("click", () => hireRole("cook", 45));
     byId("hireBarkeepBtn").addEventListener("click", () => hireRole("barkeep", 42));
     byId("hireGuardBtn").addEventListener("click", () => hireRole("guard", 38));
+    byId("rotaBalancedBtn").addEventListener("click", () => setRotaPreset("balanced"));
+    byId("rotaDayBtn").addEventListener("click", () => setRotaPreset("day_heavy"));
+    byId("rotaNightBtn").addEventListener("click", () => setRotaPreset("night_heavy"));
 
     byId("trainBtn").addEventListener("click", trainStaff);
     byId("marketingBtn").addEventListener("click", runMarketing);
@@ -323,6 +390,15 @@
     });
   }
 
+  function setRotaPreset(preset) {
+    if (!ROTA_PRESETS[preset]) {
+      return;
+    }
+    state.rotaPreset = preset;
+    logLine(`Rota preset changed to ${ROTA_PRESETS[preset].label}.`, "neutral");
+    render();
+  }
+
   function adjustPrice(product, delta) {
     const next = clamp(state.prices[product] + delta, 1, 40);
     state.prices[product] = next;
@@ -335,7 +411,30 @@
     if (!spendGold(total, `Buy ${item}`)) {
       return;
     }
+    const oldQty = state.inventory[item];
     state.inventory[item] += amount;
+    if (isSupplyItem(item)) {
+      const profile = SUPPLY_META[item];
+      const incomingQuality = clamp(
+        profile.baseQuality + randInt(-profile.qualityVariance, profile.qualityVariance),
+        30,
+        96
+      );
+      const incomingFreshness = clamp(randInt(70, 96), 25, 100);
+      const nextQty = state.inventory[item];
+      state.supplyStats[item].quality = Math.round(
+        (state.supplyStats[item].quality * oldQty + incomingQuality * amount) / nextQty
+      );
+      state.supplyStats[item].freshness = Math.round(
+        (state.supplyStats[item].freshness * oldQty + incomingFreshness * amount) / nextQty
+      );
+      logLine(
+        `Purchased ${amount} ${item} for ${formatCoin(total)} (${qualityTier(incomingQuality)} grade).`,
+        "neutral"
+      );
+      render();
+      return;
+    }
     logLine(`Purchased ${amount} ${item} for ${formatCoin(total)}.`, "neutral");
     render();
   }
@@ -370,11 +469,21 @@
     for (const item in consumes) {
       state.inventory[item] -= consumes[item];
     }
+    const ingredientResult = evaluateIngredientBlend(consumes);
+    const created = [];
     for (const item in outputs) {
-      state.inventory[item] += outputs[item];
+      const produced = Math.max(1, Math.round(outputs[item] * ingredientResult.outputMult));
+      state.inventory[item] += produced;
+      created.push(`${PRODUCT_LABELS[item] || item} +${produced}`);
     }
-    state.cleanliness = clamp(state.cleanliness - dirtPenalty, 0, 100);
-    logLine(`${label} completed.`, "good");
+    const addedDirt = ingredientResult.avgFreshness < 38 ? 1 : 0;
+    state.cleanliness = clamp(state.cleanliness - dirtPenalty - addedDirt, 0, 100);
+    state.productionQualitySum += ingredientResult.score;
+    state.productionBatches += 1;
+    logLine(
+      `${label} completed (${created.join(", ")}, ${qualityTier(ingredientResult.avgQuality)} ingredients).`,
+      "good"
+    );
     render();
   }
 
@@ -411,12 +520,20 @@
     if (!spendGold(28, "Train Staff")) {
       return;
     }
-    const trainee = pick(state.staff);
+    const trainable = state.staff.filter((person) => !isStaffUnavailable(person));
+    if (trainable.length === 0) {
+      state.gold += 28;
+      logLine("Training cancelled: all staff are currently unavailable.", "bad");
+      render();
+      return;
+    }
+    const trainee = pick(trainable);
     const serviceGain = randInt(0, 2);
     const qualityGain = randInt(1, 3);
     trainee.service = clamp(trainee.service + serviceGain, 1, 30);
     trainee.quality = clamp(trainee.quality + qualityGain, 1, 30);
     trainee.morale = clamp(trainee.morale + randInt(2, 6), 0, 100);
+    trainee.fatigue = clamp(trainee.fatigue + randInt(4, 8), 0, 100);
     logLine(
       `${trainee.role} improved (+${serviceGain} service, +${qualityGain} quality).`,
       "good"
@@ -445,17 +562,222 @@
     render();
   }
 
+  function isStaffUnavailable(person) {
+    return person.injuryDays > 0 || person.disputeDays > 0;
+  }
+
+  function evaluateIngredientBlend(consumes) {
+    let qualityTotal = 0;
+    let freshnessTotal = 0;
+    let weight = 0;
+    for (const item in consumes) {
+      if (!isSupplyItem(item)) {
+        continue;
+      }
+      const amount = consumes[item];
+      qualityTotal += state.supplyStats[item].quality * amount;
+      freshnessTotal += state.supplyStats[item].freshness * amount;
+      weight += amount;
+    }
+
+    const avgQuality = weight === 0 ? 60 : qualityTotal / weight;
+    const avgFreshness = weight === 0 ? 70 : freshnessTotal / weight;
+    const score = avgQuality * 0.62 + avgFreshness * 0.38;
+    return {
+      avgQuality,
+      avgFreshness,
+      score,
+      outputMult: clamp(1 + (score - 60) / 230, 0.82, 1.12)
+    };
+  }
+
+  function getProductionQualityContext() {
+    if (state.productionBatches === 0) {
+      return { score: 60, boost: 0 };
+    }
+    const score = state.productionQualitySum / state.productionBatches;
+    return {
+      score,
+      boost: Math.round((score - 60) / 7)
+    };
+  }
+
+  function resetProductionQualityContext() {
+    state.productionQualitySum = 0;
+    state.productionBatches = 0;
+  }
+
+  function applySupplySpoilage() {
+    const spoiled = [];
+    for (const item in SUPPLY_META) {
+      const quantity = state.inventory[item];
+      if (quantity <= 0) {
+        continue;
+      }
+
+      const meta = SUPPLY_META[item];
+      const hygienePenalty = item === "meat" || item === "veg" || item === "bread"
+        ? Math.max(0, Math.floor((52 - state.cleanliness) / 12))
+        : 0;
+      const freshnessLoss = randInt(meta.lossMin, meta.lossMax) + hygienePenalty;
+      state.supplyStats[item].freshness = clamp(
+        state.supplyStats[item].freshness - freshnessLoss,
+        0,
+        100
+      );
+      state.supplyStats[item].quality = clamp(
+        state.supplyStats[item].quality - randInt(0, 2),
+        15,
+        100
+      );
+
+      if (meta.spoilAt < 0 || state.supplyStats[item].freshness >= meta.spoilAt) {
+        continue;
+      }
+      const freshnessGap = meta.spoilAt - state.supplyStats[item].freshness;
+      const spoilRate = 0.03 + freshnessGap / 120;
+      const lost = Math.min(quantity, Math.max(1, Math.floor(quantity * spoilRate)));
+      state.inventory[item] -= lost;
+      spoiled.push({ item, lost });
+    }
+
+    if (spoiled.length === 0) {
+      return "No ingredient spoilage today.";
+    }
+    const note = spoiled
+      .slice(0, 3)
+      .map((entry) => `${entry.item} -${entry.lost}`)
+      .join(", ");
+    return `Spoilage hit ${note}.`;
+  }
+
+  function progressStaffAbsences() {
+    let returnedCount = 0;
+    let injuredCount = 0;
+    let disputeCount = 0;
+    state.staff.forEach((person) => {
+      if (person.injuryDays > 0) {
+        person.injuryDays -= 1;
+        person.fatigue = clamp(person.fatigue - randInt(6, 11), 0, 100);
+        injuredCount += 1;
+        if (person.injuryDays === 0) {
+          returnedCount += 1;
+          logLine(`${person.role} returned from injury leave.`, "good");
+        }
+      }
+      if (person.disputeDays > 0) {
+        person.disputeDays -= 1;
+        person.fatigue = clamp(person.fatigue - randInt(4, 8), 0, 100);
+        person.morale = clamp(person.morale + 2, 0, 100);
+        disputeCount += 1;
+        if (person.disputeDays === 0) {
+          returnedCount += 1;
+          logLine(`${person.role} dispute settled and returned to duty.`, "good");
+        }
+      }
+    });
+    return { returnedCount, injuredCount, disputeCount };
+  }
+
+  function assignDailyShifts(weekday) {
+    const isWeekendRush = weekday === "Fri" || weekday === "Sat";
+    const demandNightShare = isWeekendRush ? 0.62 : 0.42;
+    const preset = ROTA_PRESETS[state.rotaPreset] || ROTA_PRESETS.balanced;
+    const availableStaff = state.staff.filter((person) => !isStaffUnavailable(person));
+    let dayAssigned = 0;
+    let nightAssigned = 0;
+
+    availableStaff.forEach((person) => {
+      const roleBias = ROLE_SHIFT_BIAS[person.role] || 0;
+      const nightChance = clamp(
+        preset.nightShare + roleBias + (isWeekendRush ? 0.04 : -0.03),
+        0.08,
+        0.92
+      );
+      person.assignedShift = Math.random() < nightChance ? "night" : "day";
+      if (person.assignedShift === "night") {
+        nightAssigned += 1;
+      } else {
+        dayAssigned += 1;
+      }
+    });
+
+    const totalAssigned = dayAssigned + nightAssigned;
+    const nightShare = totalAssigned === 0 ? 0.5 : nightAssigned / totalAssigned;
+    const shiftFit = 1 - Math.abs(nightShare - demandNightShare);
+    return {
+      availableCount: totalAssigned,
+      injuredCount: state.staff.filter((person) => person.injuryDays > 0).length,
+      disputeCount: state.staff.filter((person) => person.disputeDays > 0).length,
+      dayAssigned,
+      nightAssigned,
+      shiftFit,
+      demandMult: clamp(0.86 + shiftFit * 0.25, 0.82, 1.09),
+      serviceMult: clamp(0.84 + shiftFit * 0.28, 0.8, 1.12),
+      busyShift: isWeekendRush ? "night" : "day",
+      summary:
+        totalAssigned === 0
+          ? "No staff available for rota."
+          : `Rota ${preset.label}: day ${dayAssigned}, night ${nightAssigned}.`
+    };
+  }
+
+  function applyEndOfDayStaffEffects(shiftContext, satisfaction, net) {
+    let newInjuries = 0;
+    let newDisputes = 0;
+    let fatigueTotal = 0;
+
+    state.staff.forEach((person) => {
+      if (isStaffUnavailable(person)) {
+        fatigueTotal += person.fatigue;
+        return;
+      }
+
+      const onBusyShift = person.assignedShift === shiftContext.busyShift;
+      const fatigueGain = onBusyShift ? randInt(7, 12) : randInt(3, 8);
+      const satisfactionRelief = satisfaction >= 0.68 ? 2 : 0;
+      person.fatigue = clamp(person.fatigue + fatigueGain - satisfactionRelief, 0, 100);
+      fatigueTotal += person.fatigue;
+
+      if (person.fatigue >= 84 && Math.random() < 0.09) {
+        person.injuryDays = randInt(2, 4);
+        person.morale = clamp(person.morale - randInt(4, 8), 0, 100);
+        newInjuries += 1;
+        logLine(`${person.role} suffered a fatigue injury and is out for treatment.`, "bad");
+        return;
+      }
+
+      if (person.fatigue >= 76 && person.morale < 48 && Math.random() < 0.12) {
+        person.disputeDays = randInt(1, 3);
+        person.morale = clamp(person.morale - randInt(3, 7), 0, 100);
+        newDisputes += 1;
+        logLine(`${person.role} entered a staff dispute and sat out duties.`, "bad");
+        return;
+      }
+
+      if (net > 0 && satisfaction > 0.67) {
+        person.morale = clamp(person.morale + 1, 0, 100);
+      }
+    });
+
+    const avgFatigue = state.staff.length === 0 ? 0 : Math.round(fatigueTotal / state.staff.length);
+    return { newInjuries, newDisputes, avgFatigue };
+  }
+
   function advanceDay() {
     state.day += 1;
-
+    const weekday = DAY_NAMES[(state.day - 1) % 7];
+    const absenceProgress = progressStaffAbsences();
+    const spoilageSummary = applySupplySpoilage();
+    const shiftContext = assignDailyShifts(weekday);
     const staffStats = getStaffStats();
     const mods = rollDailyEvent();
+    const kitchenContext = getProductionQualityContext();
 
     state.cleanliness = clamp(state.cleanliness - randInt(2, 6) + mods.cleanliness, 0, 100);
     state.condition = clamp(state.condition - randInt(1, 4) + mods.condition, 0, 100);
     state.reputation = clamp(state.reputation + mods.reputation, 0, 100);
 
-    const weekday = DAY_NAMES[(state.day - 1) % 7];
     const weekendMult = weekday === "Fri" || weekday === "Sat" ? 1.22 : 1.0;
 
     let demandBase =
@@ -464,6 +786,7 @@
       staffStats.service * 1.2 +
       (state.cleanliness + state.condition) * 0.3;
     demandBase = demandBase * weekendMult;
+    demandBase *= shiftContext.demandMult;
     const loyaltyDemandMult = getLoyaltyDemandMultiplier();
     demandBase *= loyaltyDemandMult;
 
@@ -477,7 +800,7 @@
     demandBase += mods.flatGuests;
     demandBase += randInt(-10, 10);
 
-    const serviceCapacity = 22 + staffStats.service * 1.5;
+    const serviceCapacity = (22 + staffStats.service * 1.5) * shiftContext.serviceMult;
     const guests = Math.max(0, Math.floor(Math.min(demandBase, serviceCapacity)));
 
     const qualityScore = clamp(
@@ -486,6 +809,7 @@
         state.cleanliness * 0.25 +
         staffStats.quality * 2 +
         (staffStats.avgMorale - 50) * 0.35 +
+        kitchenContext.boost +
         mods.qualityBoost,
       0,
       100
@@ -513,7 +837,8 @@
     const payroll = staffStats.payroll;
     const upkeep = 10 + Math.floor((100 - state.condition) / 7);
     const randomLoss = mods.expense;
-    const expenses = payroll + upkeep + randomLoss;
+    const disruptionExpense = shiftContext.injuredCount * 2 + shiftContext.disputeCount * 2;
+    const expenses = payroll + upkeep + randomLoss + disruptionExpense;
 
     const net = revenue - expenses;
     state.gold += net;
@@ -525,8 +850,14 @@
     const desiredSales = aleDemand + meadDemand + stewDemand + breadDemand;
     const madeSales = soldAle + soldMead + soldStew + soldBread;
     const fulfillment = desiredSales <= 0 ? 1 : madeSales / desiredSales;
-    const satisfaction =
-      (qualityScore / 100) * 0.65 + fulfillment * 0.35 - (state.prices.room > 22 ? 0.03 : 0);
+    const satisfaction = clamp(
+      (qualityScore / 100) * 0.6 +
+        fulfillment * 0.32 +
+        shiftContext.shiftFit * 0.08 -
+        (state.prices.room > 22 ? 0.03 : 0),
+      0.15,
+      1.05
+    );
     const patronReport = updatePatronLoyalty({
       guests,
       qualityScore,
@@ -545,17 +876,28 @@
         room: soldRooms
       }
     });
+    const staffIncidentSummary = applyEndOfDayStaffEffects(shiftContext, satisfaction, net);
     state.lastReport = {
       loyaltyDemandMult,
-      ...patronReport
+      ...patronReport,
+      staffing: `${shiftContext.summary} Avg fatigue ${staffIncidentSummary.avgFatigue}.`,
+      supplies: spoilageSummary,
+      kitchen: Math.round(kitchenContext.score),
+      satisfaction: Math.round(satisfaction * 100)
     };
 
     const repSwing = Math.round((satisfaction - 0.64) * 11);
     state.reputation = clamp(state.reputation + repSwing, 0, 100);
 
     state.staff.forEach((person) => {
+      if (isStaffUnavailable(person)) {
+        return;
+      }
       let moraleChange = Math.round((satisfaction - 0.6) * 6);
       if (net < 0) {
+        moraleChange -= 1;
+      }
+      if (person.fatigue >= 80) {
         moraleChange -= 1;
       }
       person.morale = clamp(person.morale + moraleChange, 0, 100);
@@ -579,11 +921,27 @@
     if (state.condition < 30) {
       logLine("The building is deteriorating. Repairs are urgent.", "bad");
     }
+    if (spoilageSummary !== "No ingredient spoilage today.") {
+      logLine(spoilageSummary, "bad");
+    }
+    if (absenceProgress.returnedCount > 0) {
+      logLine(`Staff returns this morning: ${absenceProgress.returnedCount}.`, "good");
+    }
+    if (staffIncidentSummary.newInjuries + staffIncidentSummary.newDisputes > 0) {
+      logLine(
+        `Staff issues today: ${staffIncidentSummary.newInjuries} injuries, ${staffIncidentSummary.newDisputes} disputes.`,
+        "bad"
+      );
+    }
+    if (shiftContext.availableCount < 2) {
+      logLine("Staffing is dangerously thin. Consider recruiting immediately.", "bad");
+    }
 
     logLine(
       `Day ${state.day} closed: ${guests} guests, revenue ${formatCoin(revenue)}, net ${formatCoin(net)}.`,
       net >= 0 ? "good" : "bad"
     );
+    resetProductionQualityContext();
     render();
   }
 
@@ -603,26 +961,47 @@
 
   function getStaffStats() {
     if (state.staff.length === 0) {
-      return { service: 0, quality: 0, avgMorale: 0, payroll: 0 };
+      return {
+        service: 0,
+        quality: 0,
+        avgMorale: 0,
+        payroll: 0,
+        avgFatigue: 0,
+        activeCount: 0,
+        unavailableCount: 0
+      };
     }
     let service = 0;
     let quality = 0;
     let moraleTotal = 0;
     let payroll = 0;
+    let fatigueTotal = 0;
+    let activeCount = 0;
+    let unavailableCount = 0;
 
     state.staff.forEach((person) => {
-      const moraleScale = 0.75 + person.morale / 200;
-      service += person.service * moraleScale;
-      quality += person.quality * moraleScale;
       moraleTotal += person.morale;
       payroll += person.wage;
+      fatigueTotal += person.fatigue;
+      if (isStaffUnavailable(person)) {
+        unavailableCount += 1;
+        return;
+      }
+      const moraleScale = 0.75 + person.morale / 200;
+      const fatigueScale = clamp(1 - person.fatigue / 160, 0.45, 1);
+      service += person.service * moraleScale * fatigueScale;
+      quality += person.quality * moraleScale * fatigueScale;
+      activeCount += 1;
     });
 
     return {
       service: Math.round(service),
       quality: Math.round(quality),
       avgMorale: moraleTotal / state.staff.length,
-      payroll
+      payroll,
+      avgFatigue: fatigueTotal / state.staff.length,
+      activeCount,
+      unavailableCount
     };
   }
 
@@ -848,6 +1227,9 @@
       `Rep ${state.reputation}`,
       `Clean ${state.cleanliness}`,
       `Condition ${state.condition}`,
+      `Rota ${ROTA_PRESETS[state.rotaPreset].label}`,
+      `Staff ${staffStats.activeCount}/${state.staff.length}`,
+      `Fatigue ${Math.round(staffStats.avgFatigue)}`,
       `Payroll ${formatCoin(staffStats.payroll)}`,
       `Guests ${state.lastGuests}`,
       `Net ${formatCoin(state.lastNet)}`
@@ -860,19 +1242,32 @@
 
   function renderInventory() {
     const list = [
-      ["Ale", state.inventory.ale],
-      ["Mead", state.inventory.mead],
-      ["Stew", state.inventory.stew],
-      ["Bread", state.inventory.bread],
-      ["Grain", state.inventory.grain],
-      ["Hops", state.inventory.hops],
-      ["Honey", state.inventory.honey],
-      ["Meat", state.inventory.meat],
-      ["Veg", state.inventory.veg],
-      ["Wood", state.inventory.wood]
+      ["ale", "Ale"],
+      ["mead", "Mead"],
+      ["stew", "Stew"],
+      ["bread", "Bread"],
+      ["grain", "Grain"],
+      ["hops", "Hops"],
+      ["honey", "Honey"],
+      ["meat", "Meat"],
+      ["veg", "Veg"],
+      ["wood", "Wood"]
     ];
     el.inventoryView.innerHTML = list
-      .map(([key, val]) => `<div class="kv-row"><span>${key}</span><span>${val}</span></div>`)
+      .map(([id, label]) => {
+        const amount = state.inventory[id];
+        if (!isSupplyItem(id)) {
+          return `<div class="kv-row"><span>${label}</span><span>${amount}</span></div>`;
+        }
+        const quality = state.supplyStats[id].quality;
+        const freshness = state.supplyStats[id].freshness;
+        return `
+          <div class="kv-row">
+            <span>${label}</span>
+            <span>${amount} (Q${quality}/${qualityTier(quality)} F${freshness})</span>
+          </div>
+        `;
+      })
       .join("");
   }
 
@@ -903,9 +1298,14 @@
   function renderStaff() {
     el.staffView.innerHTML = state.staff
       .map((person) => {
+        const status = person.injuryDays > 0
+          ? `Injured ${person.injuryDays}d`
+          : person.disputeDays > 0
+            ? `Dispute ${person.disputeDays}d`
+            : `Shift ${person.assignedShift}`;
         return `
           <div class="staff-row">
-            <span>${person.role} (S:${person.service} Q:${person.quality} M:${person.morale})</span>
+            <span>${person.role} (S:${person.service} Q:${person.quality} M:${person.morale} F:${person.fatigue}) ${status}</span>
             <span>
               ${formatCoin(person.wage)}
               <button data-fire-id="${person.id}">Fire</button>
@@ -939,11 +1339,19 @@
             : `Operations: low stock ${lowStock.join(", ")}.`
       },
       {
+        tone: state.lastReport.supplies.includes("No ingredient spoilage") ? "good" : "bad",
+        text: `Supplies: ${state.lastReport.supplies} Kitchen blend score ${state.lastReport.kitchen}.`
+      },
+      {
         tone:
           state.lastReport.topCohortLoyalty - state.lastReport.lowCohortLoyalty >= 8
             ? "good"
             : "neutral",
-        text: `Sentiment: ${topCohort.label} loyalty ${state.lastReport.topCohortLoyalty}, ${lowCohort.label} loyalty ${state.lastReport.lowCohortLoyalty}.`
+        text: `Sentiment: ${topCohort.label} loyalty ${state.lastReport.topCohortLoyalty}, ${lowCohort.label} loyalty ${state.lastReport.lowCohortLoyalty}, score ${state.lastReport.satisfaction}.`
+      },
+      {
+        tone: state.lastReport.staffing.includes("No staff available") ? "bad" : "neutral",
+        text: `Staffing: ${state.lastReport.staffing}`
       },
       {
         tone: "neutral",

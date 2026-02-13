@@ -16,6 +16,9 @@ No build step is required.
 - Tavern condition/cleanliness systems
 - Random events with immediate economic impact
 - Named patron pool with cohort preferences and loyalty-driven demand pressure
+- Rota presets with staff fatigue, injuries, and disputes
+- Ingredient quality/freshness tracking with spoilage impact on production
+- Daily report summaries for finance, operations, staffing, and guest sentiment
 - Retro interface with event log and management controls
 
 ## Next Target
