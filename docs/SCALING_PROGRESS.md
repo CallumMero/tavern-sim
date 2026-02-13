@@ -65,7 +65,44 @@ Validation:
 - `node --check` across all engine/runtime/ui modules.
 - Headless smoke run: init, advance day, save snapshot, seeded new game, reload snapshot.
 
+## 2026-02-13: Scenario Fixtures + Regression Harness
+
+Completed:
+
+- Added deterministic scenario fixture catalog in `src/engine/scenarioFixtures.js`:
+  - `baseline`
+  - `cash_crunch`
+  - `festival_surge`
+  - `burnout_edge`
+  - `spoilage_alert`
+- Added engine scenario APIs:
+  - `listScenarios()`
+  - `loadScenario(scenarioId, seedLike)`
+- Added runtime debug controls through `window.tavernSim`:
+  - `scenarios()`
+  - `loadScenario(id, seed)`
+- Added deterministic regression runner:
+  - `scripts/regression/runScenarios.mjs`
+  - Runs all fixtures with fixed seeds.
+  - Validates state invariants.
+  - Verifies deterministic replay (same fixture + seed => same signature).
+
+Files:
+
+- `src/engine/scenarioFixtures.js`
+- `src/engine/gameEngine.js`
+- `src/runtime/startApp.js`
+- `scripts/regression/runScenarios.mjs`
+
+Validation:
+
+- `node --check src/engine/scenarioFixtures.js`
+- `node --check src/engine/gameEngine.js`
+- `node --check src/runtime/startApp.js`
+- `node --check scripts/regression/runScenarios.mjs`
+- `node scripts/regression/runScenarios.mjs` (5/5 scenarios passed)
+
 ## Next Work Items
 
-- Add scenario fixtures and deterministic regression runs.
 - Move large static content payloads into dedicated `src/content/` modules.
+- Add CI-style command wrappers once a package manifest is introduced.

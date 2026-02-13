@@ -22,7 +22,10 @@ Key runtime capabilities:
 
 - Auto-load from browser storage on startup (if a save exists)
 - Auto-save on each engine state change
-- Debug console handle at `window.tavernSim` (`save`, `load`, `newGame(seed)`)
+- Debug console handle at `window.tavernSim`:
+  - `save()`, `load()`, `newGame(seed)`
+  - `scenarios()` to list named engine fixtures
+  - `loadScenario(id, seed)` to start from a deterministic fixture
 
 ## Current Vertical Slice
 
@@ -40,3 +43,10 @@ Key runtime capabilities:
 ## Next Target
 
 See `docs/ROADMAP.md` for the plan to evolve this into a deep manager-style sim.
+
+## Deterministic Regression Checks
+
+Run scenario-based regressions from the repo root:
+
+- `node scripts/regression/runScenarios.mjs`
+- `node scripts/regression/runScenarios.mjs cash_crunch`

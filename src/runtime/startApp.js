@@ -4,7 +4,9 @@ import {
   loadGame,
   saveGame,
   subscribeOnChange,
-  startNewGame
+  startNewGame,
+  listScenarios,
+  loadScenario
 } from "../engine/gameEngine.js";
 import { createGameUI } from "../ui/gameUI.js";
 import { createPersistence } from "./persistence.js";
@@ -44,6 +46,14 @@ export function startApp() {
     clearSave: () => persistence.clear(),
     newGame: (seed = null) => {
       const result = startNewGame(seed);
+      if (result.ok) {
+        saveCurrentState();
+      }
+      return result;
+    },
+    scenarios: () => listScenarios(),
+    loadScenario: (scenarioId, seed = null) => {
+      const result = loadScenario(scenarioId, seed);
       if (result.ok) {
         saveCurrentState();
       }

@@ -3,8 +3,13 @@ import {
   DAY_NAMES,
   PRICE_DEFAULTS,
   ROTA_PRESETS,
-  COHORT_PROFILES
+  COHORT_PROFILES,
+  PRODUCT_LABELS
 } from "./config.js";
+import {
+  getScenarioFixture,
+  listScenarioFixtures
+} from "./scenarioFixtures.js";
 import {
   createStaff as createStaffModel,
   isStaffUnavailable,
@@ -683,6 +688,40 @@ function startNewGame(seedLike = null) {
   return { ok: true };
 }
 
+function listScenarios() {
+  return listScenarioFixtures();
+}
+
+function loadScenario(scenarioId, seedLike = null) {
+  const fixture = getScenarioFixture(scenarioId);
+  if (!fixture) {
+    return {
+      ok: false,
+      error: `Unknown scenario: ${scenarioId}.`
+    };
+  }
+
+  const selectedSeed =
+    seedLike === null || seedLike === undefined || seedLike === ""
+      ? fixture.recommendedSeed
+      : seedLike;
+
+  const bootResult = startNewGame(selectedSeed);
+  if (!bootResult.ok) {
+    return bootResult;
+  }
+
+  fixture.apply(state, { createStaff });
+  logLine(`Scenario loaded: ${fixture.label}.`, "neutral");
+  render();
+
+  return {
+    ok: true,
+    scenario: fixture.id,
+    seed: selectedSeed
+  };
+}
+
 function subscribeOnChange(listener) {
   if (typeof listener !== "function") {
     return () => {};
@@ -731,6 +770,8 @@ export {
   setRandomSeed,
   clearRandomSeed,
   startNewGame,
+  listScenarios,
+  loadScenario,
   getStaffStats,
   setRotaPreset,
   adjustPrice,

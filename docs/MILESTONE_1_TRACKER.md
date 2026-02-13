@@ -73,4 +73,4 @@ Files:
 ## Notes For Milestone 2
 
 - Keep new systems but split `src/engine/gameEngine.js` into smaller engine modules before adding district/faction layers
-- Add deterministic seeded runs and scenario fixtures to make balancing faster
+- Deterministic seeded runs and scenario fixtures are now in place for faster balancing
