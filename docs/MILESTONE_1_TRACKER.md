@@ -26,7 +26,7 @@ Milestone 1 goal from `docs/ROADMAP.md`:
 
 Files:
 
-- `game.js`
+- `src/engine/gameEngine.js`
 
 ### Staff Rotas, Fatigue, Injuries, Disputes
 
@@ -39,7 +39,7 @@ Files:
 Files:
 
 - `index.html`
-- `game.js`
+- `src/engine/gameEngine.js`
 - `styles.css`
 
 ### Ingredient Quality And Spoilage
@@ -52,7 +52,7 @@ Files:
 
 Files:
 
-- `game.js`
+- `src/engine/gameEngine.js`
 
 ### Daily Reporting
 
@@ -61,16 +61,16 @@ Files:
 
 Files:
 
-- `game.js`
+- `src/engine/gameEngine.js`
 - `index.html`
 - `styles.css`
 
 ## Validation
 
-- Syntax check: `node --check game.js`
+- Syntax check: `node --check src/engine/gameEngine.js`
 - Manual playtest: open `index.html` and run multiple days while changing rota presets and supply purchases
 
 ## Notes For Milestone 2
 
-- Keep new systems but split simulation logic out of `game.js` into modules before adding district/faction layers
+- Keep new systems but split `src/engine/gameEngine.js` into smaller engine modules before adding district/faction layers
 - Add deterministic seeded runs and scenario fixtures to make balancing faster

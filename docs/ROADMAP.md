@@ -58,7 +58,7 @@ Status: Completed on February 13, 2026 with the current browser playable slice.
 
 ## Suggested Technical Direction
 
-- Keep core simulation in pure data modules (easy balancing + tests)
-- Keep rendering thin and event-driven
+- Keep core simulation in pure data modules (easy balancing + tests) [in progress via `src/engine/`]
+- Keep rendering thin and event-driven [in progress via `src/ui/`]
 - Add deterministic seeded simulation mode for debugging
 - Add scenario fixtures for rapid balancing and regression tests

@@ -1,5 +1,4 @@
-(function () {
-  const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
   const ROLE_TEMPLATES = {
     server: { wage: 8, service: 16, quality: 2 },
@@ -132,7 +131,7 @@
     wood: { label: "Wood", baseQuality: 72, qualityVariance: 8, lossMin: 0, lossMax: 1, spoilAt: -1 }
   };
 
-  const state = {
+const state = {
     day: 1,
     gold: 260,
     reputation: 45,
@@ -182,25 +181,8 @@
     log: []
   };
 
-  const el = {
-    topStats: byId("topStats"),
-    inventoryView: byId("inventoryView"),
-    priceView: byId("priceView"),
-    staffView: byId("staffView"),
-    reportView: byId("reportView"),
-    logView: byId("logView")
-  };
-
-  bindActions();
-  logLine("Tavern charter signed. Trade can now begin.", "neutral");
-  logLine("Tip: keep ale and stew stocked before Fridays and Saturdays.", "neutral");
-  logLine("Tip: loyal patrons boost future demand. Watch the daily report.", "neutral");
-  logLine("Tip: fatigue builds over time. Use rota presets to protect your staff.", "neutral");
-  render();
-
-  function byId(id) {
-    return document.getElementById(id);
-  }
+let onChange = () => {};
+let initialized = false;
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -297,97 +279,6 @@
       }
     }
     return "locals";
-  }
-
-  function bindActions() {
-    byId("nextDayBtn").addEventListener("click", advanceDay);
-
-    byId("brewAleBtn").addEventListener("click", () => {
-      craft(
-        "Brew Ale",
-        { grain: 4, hops: 3, wood: 2 },
-        { ale: 28 },
-        0,
-        2
-      );
-    });
-
-    byId("brewMeadBtn").addEventListener("click", () => {
-      craft(
-        "Brew Mead",
-        { honey: 4, grain: 2, wood: 2 },
-        { mead: 20 },
-        0,
-        2
-      );
-    });
-
-    byId("cookStewBtn").addEventListener("click", () => {
-      craft(
-        "Cook Stew",
-        { meat: 4, veg: 4, bread: 2, wood: 1 },
-        { stew: 18 },
-        0,
-        1
-      );
-    });
-
-    byId("cleanBtn").addEventListener("click", () => {
-      if (!spendGold(14, "Deep clean")) {
-        return;
-      }
-      state.cleanliness = clamp(state.cleanliness + 20, 0, 100);
-      logLine("You paid for a full scrub and fresh linens (+cleanliness).", "good");
-      render();
-    });
-
-    byId("repairBtn").addEventListener("click", () => {
-      if (!spendGold(40, "Repairs")) {
-        return;
-      }
-      state.condition = clamp(state.condition + 24, 0, 100);
-      logLine("Carpenters repaired beams and tables (+condition).", "good");
-      render();
-    });
-
-    byId("buyGrainBtn").addEventListener("click", () => buySupply("grain", 8, 5));
-    byId("buyHopsBtn").addEventListener("click", () => buySupply("hops", 8, 6));
-    byId("buyHoneyBtn").addEventListener("click", () => buySupply("honey", 6, 9));
-    byId("buyMeatBtn").addEventListener("click", () => buySupply("meat", 6, 8));
-    byId("buyVegBtn").addEventListener("click", () => buySupply("veg", 8, 5));
-    byId("buyBreadBtn").addEventListener("click", () => buySupply("bread", 10, 4));
-    byId("buyWoodBtn").addEventListener("click", () => buySupply("wood", 10, 4));
-
-    byId("hireServerBtn").addEventListener("click", () => hireRole("server", 35));
-    byId("hireCookBtn").addEventListener("click", () => hireRole("cook", 45));
-    byId("hireBarkeepBtn").addEventListener("click", () => hireRole("barkeep", 42));
-    byId("hireGuardBtn").addEventListener("click", () => hireRole("guard", 38));
-    byId("rotaBalancedBtn").addEventListener("click", () => setRotaPreset("balanced"));
-    byId("rotaDayBtn").addEventListener("click", () => setRotaPreset("day_heavy"));
-    byId("rotaNightBtn").addEventListener("click", () => setRotaPreset("night_heavy"));
-
-    byId("trainBtn").addEventListener("click", trainStaff);
-    byId("marketingBtn").addEventListener("click", runMarketing);
-    byId("festivalBtn").addEventListener("click", hostFestival);
-
-    el.priceView.addEventListener("click", (event) => {
-      const btn = event.target.closest("button[data-product]");
-      if (!btn) {
-        return;
-      }
-      const product = btn.getAttribute("data-product");
-      const delta = Number(btn.getAttribute("data-delta"));
-      adjustPrice(product, delta);
-    });
-
-    el.staffView.addEventListener("click", (event) => {
-      const btn = event.target.closest("button[data-fire-id]");
-      if (!btn) {
-        return;
-      }
-      const id = btn.getAttribute("data-fire-id");
-      fireStaff(id);
-    });
   }
 
   function setRotaPreset(preset) {
@@ -551,16 +442,34 @@
     render();
   }
 
-  function hostFestival() {
-    if (!spendGold(50, "Minstrel Night")) {
-      return;
-    }
-    state.festivalDays = Math.max(state.festivalDays, 2);
-    state.cleanliness = clamp(state.cleanliness - 6, 0, 100);
-    state.reputation = clamp(state.reputation + 2, 0, 100);
-    logLine("Minstrel night booked (+demand for 2 days, more mess).", "good");
-    render();
+function hostFestival() {
+  if (!spendGold(50, "Minstrel Night")) {
+    return;
   }
+  state.festivalDays = Math.max(state.festivalDays, 2);
+  state.cleanliness = clamp(state.cleanliness - 6, 0, 100);
+  state.reputation = clamp(state.reputation + 2, 0, 100);
+  logLine("Minstrel night booked (+demand for 2 days, more mess).", "good");
+  render();
+}
+
+function deepClean() {
+  if (!spendGold(14, "Deep clean")) {
+    return;
+  }
+  state.cleanliness = clamp(state.cleanliness + 20, 0, 100);
+  logLine("You paid for a full scrub and fresh linens (+cleanliness).", "good");
+  render();
+}
+
+function repairTavern() {
+  if (!spendGold(40, "Repairs")) {
+    return;
+  }
+  state.condition = clamp(state.condition + 24, 0, 100);
+  logLine("Carpenters repaired beams and tables (+condition).", "good");
+  render();
+}
 
   function isStaffUnavailable(person) {
     return person.injuryDays > 0 || person.disputeDays > 0;
@@ -1208,174 +1117,54 @@
     return mods;
   }
 
-  function render() {
-    renderTopStats();
-    renderInventory();
-    renderPrices();
-    renderStaff();
-    renderReport();
-    renderLog();
+function render() {
+  onChange();
+}
+
+function logLine(message, tone) {
+  state.log.unshift({ day: state.day, message, tone });
+  if (state.log.length > 180) {
+    state.log.length = 180;
   }
+}
 
-  function renderTopStats() {
-    const staffStats = getStaffStats();
-    const weekday = DAY_NAMES[(state.day - 1) % 7];
+function setOnChange(listener) {
+  onChange = typeof listener === "function" ? listener : () => {};
+}
 
-    const tiles = [
-      `Day ${state.day} (${weekday})`,
-      `Gold ${formatCoin(state.gold)}`,
-      `Rep ${state.reputation}`,
-      `Clean ${state.cleanliness}`,
-      `Condition ${state.condition}`,
-      `Rota ${ROTA_PRESETS[state.rotaPreset].label}`,
-      `Staff ${staffStats.activeCount}/${state.staff.length}`,
-      `Fatigue ${Math.round(staffStats.avgFatigue)}`,
-      `Payroll ${formatCoin(staffStats.payroll)}`,
-      `Guests ${state.lastGuests}`,
-      `Net ${formatCoin(state.lastNet)}`
-    ];
-
-    el.topStats.innerHTML = tiles
-      .map((text) => `<div class="chip">${text}</div>`)
-      .join("");
+function initGame() {
+  if (initialized) {
+    return;
   }
+  initialized = true;
+  logLine("Tavern charter signed. Trade can now begin.", "neutral");
+  logLine("Tip: keep ale and stew stocked before Fridays and Saturdays.", "neutral");
+  logLine("Tip: loyal patrons boost future demand. Watch the daily report.", "neutral");
+  logLine("Tip: fatigue builds over time. Use rota presets to protect your staff.", "neutral");
+  render();
+}
 
-  function renderInventory() {
-    const list = [
-      ["ale", "Ale"],
-      ["mead", "Mead"],
-      ["stew", "Stew"],
-      ["bread", "Bread"],
-      ["grain", "Grain"],
-      ["hops", "Hops"],
-      ["honey", "Honey"],
-      ["meat", "Meat"],
-      ["veg", "Veg"],
-      ["wood", "Wood"]
-    ];
-    el.inventoryView.innerHTML = list
-      .map(([id, label]) => {
-        const amount = state.inventory[id];
-        if (!isSupplyItem(id)) {
-          return `<div class="kv-row"><span>${label}</span><span>${amount}</span></div>`;
-        }
-        const quality = state.supplyStats[id].quality;
-        const freshness = state.supplyStats[id].freshness;
-        return `
-          <div class="kv-row">
-            <span>${label}</span>
-            <span>${amount} (Q${quality}/${qualityTier(quality)} F${freshness})</span>
-          </div>
-        `;
-      })
-      .join("");
-  }
-
-  function renderPrices() {
-    const rows = [
-      ["ale", "Ale"],
-      ["mead", "Mead"],
-      ["stew", "Stew"],
-      ["bread", "Bread"],
-      ["room", "Room"]
-    ];
-    el.priceView.innerHTML = rows
-      .map(([id, label]) => {
-        const price = state.prices[id];
-        return `
-          <div class="price-row">
-            <span>${label}: ${formatCoin(price)}</span>
-            <span class="price-controls">
-              <button data-product="${id}" data-delta="-1">-</button>
-              <button data-product="${id}" data-delta="1">+</button>
-            </span>
-          </div>
-        `;
-      })
-      .join("");
-  }
-
-  function renderStaff() {
-    el.staffView.innerHTML = state.staff
-      .map((person) => {
-        const status = person.injuryDays > 0
-          ? `Injured ${person.injuryDays}d`
-          : person.disputeDays > 0
-            ? `Dispute ${person.disputeDays}d`
-            : `Shift ${person.assignedShift}`;
-        return `
-          <div class="staff-row">
-            <span>${person.role} (S:${person.service} Q:${person.quality} M:${person.morale} F:${person.fatigue}) ${status}</span>
-            <span>
-              ${formatCoin(person.wage)}
-              <button data-fire-id="${person.id}">Fire</button>
-            </span>
-          </div>
-        `;
-      })
-      .join("");
-  }
-
-  function renderReport() {
-    const topCohort = COHORT_PROFILES[state.lastReport.topCohort] || COHORT_PROFILES.locals;
-    const lowCohort = COHORT_PROFILES[state.lastReport.lowCohort] || COHORT_PROFILES.locals;
-    const lowStock = Object.entries(state.inventory)
-      .filter(([, amount]) => amount < 10)
-      .sort((a, b) => a[1] - b[1])
-      .slice(0, 4)
-      .map(([item, amount]) => `${item}(${amount})`);
-
-    const netPrefix = state.lastNet >= 0 ? "+" : "";
-    const lines = [
-      {
-        tone: state.lastNet >= 0 ? "good" : "bad",
-        text: `Finance: ${formatCoin(state.lastRevenue)} revenue, ${formatCoin(state.lastExpenses)} expenses, ${netPrefix}${formatCoin(state.lastNet)} net.`
-      },
-      {
-        tone: lowStock.length === 0 ? "good" : "bad",
-        text:
-          lowStock.length === 0
-            ? "Operations: no critical low-stock items."
-            : `Operations: low stock ${lowStock.join(", ")}.`
-      },
-      {
-        tone: state.lastReport.supplies.includes("No ingredient spoilage") ? "good" : "bad",
-        text: `Supplies: ${state.lastReport.supplies} Kitchen blend score ${state.lastReport.kitchen}.`
-      },
-      {
-        tone:
-          state.lastReport.topCohortLoyalty - state.lastReport.lowCohortLoyalty >= 8
-            ? "good"
-            : "neutral",
-        text: `Sentiment: ${topCohort.label} loyalty ${state.lastReport.topCohortLoyalty}, ${lowCohort.label} loyalty ${state.lastReport.lowCohortLoyalty}, score ${state.lastReport.satisfaction}.`
-      },
-      {
-        tone: state.lastReport.staffing.includes("No staff available") ? "bad" : "neutral",
-        text: `Staffing: ${state.lastReport.staffing}`
-      },
-      {
-        tone: "neutral",
-        text: `Patron watch: ${state.lastReport.highlight} Loyalty demand factor ${state.lastReport.loyaltyDemandMult.toFixed(2)}x.`
-      }
-    ];
-
-    el.reportView.innerHTML = lines
-      .map((line) => `<div class="report-line ${line.tone}">${line.text}</div>`)
-      .join("");
-  }
-
-  function logLine(message, tone) {
-    state.log.unshift({ day: state.day, message, tone });
-    if (state.log.length > 180) {
-      state.log.length = 180;
-    }
-  }
-
-  function renderLog() {
-    el.logView.innerHTML = state.log
-      .map((entry) => {
-        return `<div class="log-line ${entry.tone}">D${entry.day}: ${entry.message}</div>`;
-      })
-      .join("");
-  }
-})();
+export {
+  DAY_NAMES,
+  COHORT_PROFILES,
+  PRICE_DEFAULTS,
+  ROTA_PRESETS,
+  state,
+  initGame,
+  setOnChange,
+  formatCoin,
+  qualityTier,
+  getStaffStats,
+  setRotaPreset,
+  adjustPrice,
+  buySupply,
+  craft,
+  hireRole,
+  fireStaff,
+  trainStaff,
+  runMarketing,
+  hostFestival,
+  deepClean,
+  repairTavern,
+  advanceDay
+};

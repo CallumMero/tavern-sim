@@ -8,6 +8,16 @@ Open `index.html` in your browser.
 
 No build step is required.
 
+## Architecture
+
+The codebase is split into three layers:
+
+- `src/runtime/` controls app startup and environment wiring
+- `src/engine/` contains simulation state and game logic
+- `src/ui/` owns DOM bindings and rendering
+
+Entry point: `src/main.js`
+
 ## Current Vertical Slice
 
 - Daily simulation loop with finances, reputation, and guest demand
