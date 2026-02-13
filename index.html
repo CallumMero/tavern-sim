@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tavern Sim</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="scanline"></div>
+  <main class="app-shell">
+    <header class="topbar panel">
+      <div class="brand">
+        <h1>TAVERN SIM</h1>
+        <p>Guild Quarter Ledger</p>
+      </div>
+      <div class="top-stats" id="topStats"></div>
+    </header>
+
+    <section class="grid">
+      <aside class="panel col left">
+        <h2>Operations</h2>
+        <div class="group">
+          <h3>Production</h3>
+          <button id="brewAleBtn">Brew Ale</button>
+          <button id="brewMeadBtn">Brew Mead</button>
+          <button id="cookStewBtn">Cook Stew</button>
+          <button id="cleanBtn">Deep Clean</button>
+          <button id="repairBtn">Repair Tavern</button>
+        </div>
+
+        <div class="group">
+          <h3>Supplies</h3>
+          <button id="buyGrainBtn">Buy Grain</button>
+          <button id="buyHopsBtn">Buy Hops</button>
+          <button id="buyHoneyBtn">Buy Honey</button>
+          <button id="buyMeatBtn">Buy Meat</button>
+          <button id="buyVegBtn">Buy Vegetables</button>
+          <button id="buyBreadBtn">Buy Bread</button>
+          <button id="buyWoodBtn">Buy Firewood</button>
+        </div>
+      </aside>
+
+      <section class="panel col center">
+        <h2>Ledger And Control</h2>
+
+        <div class="summary-grid">
+          <div>
+            <h3>Inventory</h3>
+            <div id="inventoryView" class="kv-list"></div>
+          </div>
+          <div>
+            <h3>Price Board</h3>
+            <div id="priceView" class="price-list"></div>
+          </div>
+        </div>
+
+        <div class="group inline">
+          <button id="trainBtn">Train Staff</button>
+          <button id="marketingBtn">Run Marketing</button>
+          <button id="festivalBtn">Host Minstrel Night</button>
+          <button id="nextDayBtn" class="primary">Advance Day</button>
+        </div>
+
+        <h3>Daily Log</h3>
+        <div id="logView" class="log"></div>
+      </section>
+
+      <aside class="panel col right">
+        <h2>People</h2>
+        <div class="group">
+          <h3>Staff</h3>
+          <div id="staffView" class="staff-list"></div>
+          <button id="hireServerBtn">Hire Server</button>
+          <button id="hireCookBtn">Hire Cook</button>
+          <button id="hireBarkeepBtn">Hire Barkeep</button>
+          <button id="hireGuardBtn">Hire Guard</button>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>
