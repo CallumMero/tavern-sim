@@ -166,6 +166,14 @@ button.primary {
   min-height: 110px;
 }
 
+.report-list {
+  border: 1px solid var(--line);
+  background: #111c26;
+  padding: 0.45rem;
+  margin-bottom: 0.75rem;
+  min-height: 90px;
+}
+
 .kv-row,
 .staff-row,
 .price-row {
@@ -204,11 +212,21 @@ button.primary {
 }
 
 .log {
-  height: 315px;
+  height: 250px;
   overflow: auto;
   border: 1px solid var(--line);
   background: #0e1821;
   padding: 0.5rem;
+}
+
+.report-line {
+  font-size: 0.78rem;
+  border-bottom: 1px dotted rgba(172, 191, 206, 0.18);
+  padding: 0.24rem 0;
+}
+
+.report-line:last-child {
+  border-bottom: 0;
 }
 
 .log-line {
