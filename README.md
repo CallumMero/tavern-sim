@@ -15,6 +15,7 @@ No build step is required.
 - Staff hiring/training and payroll pressure
 - Tavern condition/cleanliness systems
 - Random events with immediate economic impact
+- Named patron pool with cohort preferences and loyalty-driven demand pressure
 - Retro interface with event log and management controls
 
 ## Next Target

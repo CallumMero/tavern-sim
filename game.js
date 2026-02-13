@@ -16,6 +16,99 @@
     room: 16
   };
 
+  const COHORT_PROFILES = {
+    locals: {
+      label: "Locals",
+      weight: 0.38,
+      preferredProducts: ["ale", "bread", "stew"],
+      priceSensitivity: 1.25,
+      qualityNeed: 48
+    },
+    adventurers: {
+      label: "Adventurers",
+      weight: 0.26,
+      preferredProducts: ["ale", "stew", "room"],
+      priceSensitivity: 0.95,
+      qualityNeed: 52
+    },
+    merchants: {
+      label: "Merchants",
+      weight: 0.22,
+      preferredProducts: ["mead", "bread", "room"],
+      priceSensitivity: 1.05,
+      qualityNeed: 56
+    },
+    nobles: {
+      label: "Nobles",
+      weight: 0.14,
+      preferredProducts: ["mead", "room", "stew"],
+      priceSensitivity: 0.65,
+      qualityNeed: 66
+    }
+  };
+
+  const PRODUCT_LABELS = {
+    ale: "ale",
+    mead: "mead",
+    stew: "stew",
+    bread: "bread",
+    room: "rooms"
+  };
+
+  const PATRON_FIRST_NAMES = [
+    "Alda",
+    "Bram",
+    "Cora",
+    "Dain",
+    "Elsa",
+    "Fenn",
+    "Galen",
+    "Hilda",
+    "Iris",
+    "Joren",
+    "Kara",
+    "Lio",
+    "Mira",
+    "Nolan",
+    "Orrin",
+    "Pella",
+    "Quin",
+    "Rhea",
+    "Soren",
+    "Tamsin",
+    "Ulric",
+    "Vera",
+    "Wren",
+    "Yara"
+  ];
+
+  const PATRON_LAST_NAMES = [
+    "Ashford",
+    "Briar",
+    "Crowley",
+    "Dunlop",
+    "Eldergrove",
+    "Falk",
+    "Grimsby",
+    "Hearth",
+    "Ironwell",
+    "Juniper",
+    "Kettle",
+    "Longstep",
+    "Morrow",
+    "Northmill",
+    "Oakley",
+    "Piper",
+    "Quickwater",
+    "Rook",
+    "Stormer",
+    "Thorn",
+    "Umber",
+    "Vale",
+    "Westfall",
+    "Yew"
+  ];
+
   const state = {
     day: 1,
     gold: 260,
@@ -46,6 +139,15 @@
       createStaff("cook"),
       createStaff("server")
     ],
+    patrons: createPatronPool(30),
+    lastReport: {
+      loyaltyDemandMult: 1,
+      topCohort: "locals",
+      lowCohort: "locals",
+      topCohortLoyalty: 50,
+      lowCohortLoyalty: 50,
+      highlight: "The regular crowd is settling in."
+    },
     log: []
   };
 
@@ -54,12 +156,14 @@
     inventoryView: byId("inventoryView"),
     priceView: byId("priceView"),
     staffView: byId("staffView"),
+    reportView: byId("reportView"),
     logView: byId("logView")
   };
 
   bindActions();
   logLine("Tavern charter signed. Trade can now begin.", "neutral");
   logLine("Tip: keep ale and stew stocked before Fridays and Saturdays.", "neutral");
+  logLine("Tip: loyal patrons boost future demand. Watch the daily report.", "neutral");
   render();
 
   function byId(id) {
@@ -93,6 +197,42 @@
       quality: clamp(tpl.quality + randInt(-2, 3), 1, 20),
       morale: randInt(52, 76)
     };
+  }
+
+  function createPatronPool(count) {
+    const pool = [];
+    for (let i = 0; i < count; i += 1) {
+      pool.push(createPatron(i));
+    }
+    return pool;
+  }
+
+  function createPatron(index) {
+    const cohort = pickWeightedCohort();
+    const profile = COHORT_PROFILES[cohort];
+    const first = PATRON_FIRST_NAMES[randInt(0, PATRON_FIRST_NAMES.length - 1)];
+    const last = PATRON_LAST_NAMES[randInt(0, PATRON_LAST_NAMES.length - 1)];
+    const preference = pick(profile.preferredProducts);
+    return {
+      id: `patron-${index}-${Math.random().toString(36).slice(2, 7)}`,
+      name: `${first} ${last}`,
+      cohort,
+      preference,
+      loyalty: randInt(36, 64),
+      visits: 0
+    };
+  }
+
+  function pickWeightedCohort() {
+    const roll = Math.random();
+    let threshold = 0;
+    for (const cohort in COHORT_PROFILES) {
+      threshold += COHORT_PROFILES[cohort].weight;
+      if (roll <= threshold) {
+        return cohort;
+      }
+    }
+    return "locals";
   }
 
   function bindActions() {
@@ -324,6 +464,8 @@
       staffStats.service * 1.2 +
       (state.cleanliness + state.condition) * 0.3;
     demandBase = demandBase * weekendMult;
+    const loyaltyDemandMult = getLoyaltyDemandMultiplier();
+    demandBase *= loyaltyDemandMult;
 
     if (state.marketingDays > 0) {
       demandBase *= 1.17;
@@ -385,6 +527,28 @@
     const fulfillment = desiredSales <= 0 ? 1 : madeSales / desiredSales;
     const satisfaction =
       (qualityScore / 100) * 0.65 + fulfillment * 0.35 - (state.prices.room > 22 ? 0.03 : 0);
+    const patronReport = updatePatronLoyalty({
+      guests,
+      qualityScore,
+      wanted: {
+        ale: aleDemand,
+        mead: meadDemand,
+        stew: stewDemand,
+        bread: breadDemand,
+        room: roomDemand
+      },
+      sold: {
+        ale: soldAle,
+        mead: soldMead,
+        stew: soldStew,
+        bread: soldBread,
+        room: soldRooms
+      }
+    });
+    state.lastReport = {
+      loyaltyDemandMult,
+      ...patronReport
+    };
 
     const repSwing = Math.round((satisfaction - 0.64) * 11);
     state.reputation = clamp(state.reputation + repSwing, 0, 100);
@@ -459,6 +623,133 @@
       quality: Math.round(quality),
       avgMorale: moraleTotal / state.staff.length,
       payroll
+    };
+  }
+
+  function getPatronMoodSnapshot() {
+    const cohortTotals = {};
+    for (const cohort in COHORT_PROFILES) {
+      cohortTotals[cohort] = { sum: 0, count: 0 };
+    }
+
+    let allLoyalty = 0;
+    state.patrons.forEach((patron) => {
+      allLoyalty += patron.loyalty;
+      cohortTotals[patron.cohort].sum += patron.loyalty;
+      cohortTotals[patron.cohort].count += 1;
+    });
+
+    let topCohort = "locals";
+    let lowCohort = "locals";
+    let topLoyalty = -1;
+    let lowLoyalty = 101;
+    const cohortAverages = {};
+
+    for (const cohort in cohortTotals) {
+      const cohortData = cohortTotals[cohort];
+      const average = cohortData.count === 0 ? 50 : cohortData.sum / cohortData.count;
+      cohortAverages[cohort] = average;
+      if (average > topLoyalty) {
+        topLoyalty = average;
+        topCohort = cohort;
+      }
+      if (average < lowLoyalty) {
+        lowLoyalty = average;
+        lowCohort = cohort;
+      }
+    }
+
+    return {
+      avgLoyalty: state.patrons.length === 0 ? 50 : allLoyalty / state.patrons.length,
+      topCohort,
+      lowCohort,
+      cohortAverages
+    };
+  }
+
+  function getLoyaltyDemandMultiplier() {
+    const snapshot = getPatronMoodSnapshot();
+    return clamp(0.86 + snapshot.avgLoyalty / 245, 0.88, 1.16);
+  }
+
+  function pickVisitingPatrons(visitorCount) {
+    const shuffled = state.patrons.slice();
+    for (let i = shuffled.length - 1; i > 0; i -= 1) {
+      const swapIndex = randInt(0, i);
+      const temp = shuffled[i];
+      shuffled[i] = shuffled[swapIndex];
+      shuffled[swapIndex] = temp;
+    }
+    return shuffled.slice(0, Math.min(visitorCount, shuffled.length));
+  }
+
+  function updatePatronLoyalty(dayStats) {
+    if (state.patrons.length === 0) {
+      return {
+        topCohort: "locals",
+        lowCohort: "locals",
+        topCohortLoyalty: 50,
+        lowCohortLoyalty: 50,
+        highlight: "No patron records are available yet."
+      };
+    }
+
+    const visitorCount =
+      dayStats.guests <= 0
+        ? 0
+        : Math.min(state.patrons.length, Math.max(5, Math.floor(dayStats.guests * 0.44)));
+    const visitors = pickVisitingPatrons(visitorCount);
+
+    let bestReaction = { patron: null, delta: -999 };
+    let worstReaction = { patron: null, delta: 999 };
+
+    visitors.forEach((patron) => {
+      const profile = COHORT_PROFILES[patron.cohort];
+      const wantedUnits = dayStats.wanted[patron.preference];
+      const soldUnits = dayStats.sold[patron.preference];
+      const fulfillment = wantedUnits <= 0 ? 1 : soldUnits / wantedUnits;
+      const stockDelta = (fulfillment - 0.7) * 2.3;
+
+      const priceRatio = state.prices[patron.preference] / PRICE_DEFAULTS[patron.preference];
+      const priceDelta =
+        priceRatio <= 1
+          ? (1 - priceRatio) * 0.35
+          : -(priceRatio - 1) * profile.priceSensitivity * 1.6;
+
+      const qualityDelta = (dayStats.qualityScore - profile.qualityNeed) / 34;
+      const noise = randInt(-4, 4) / 10;
+      const loyaltyDelta = clamp(stockDelta + priceDelta + qualityDelta + noise, -2.8, 2.8);
+
+      patron.loyalty = clamp(patron.loyalty + loyaltyDelta, 0, 100);
+      patron.visits += 1;
+
+      if (loyaltyDelta > bestReaction.delta) {
+        bestReaction = { patron, delta: loyaltyDelta };
+      }
+      if (loyaltyDelta < worstReaction.delta) {
+        worstReaction = { patron, delta: loyaltyDelta };
+      }
+    });
+
+    const mood = getPatronMoodSnapshot();
+    const topCohortLoyalty = Math.round(mood.cohortAverages[mood.topCohort]);
+    const lowCohortLoyalty = Math.round(mood.cohortAverages[mood.lowCohort]);
+
+    let highlight = "Patron sentiment stayed steady today.";
+    if (visitors.length === 0) {
+      highlight = "No guests arrived. Loyalty stayed unchanged.";
+    } else if (bestReaction.patron && bestReaction.delta >= 0.9) {
+      highlight = `${bestReaction.patron.name} (${COHORT_PROFILES[bestReaction.patron.cohort].label}) praised your ${PRODUCT_LABELS[bestReaction.patron.preference]}.`;
+    } else if (worstReaction.patron && worstReaction.delta <= -0.9) {
+      highlight = `${worstReaction.patron.name} (${COHORT_PROFILES[worstReaction.patron.cohort].label}) complained about your ${PRODUCT_LABELS[worstReaction.patron.preference]}.`;
+    }
+
+    return {
+      topCohort: mood.topCohort,
+      lowCohort: mood.lowCohort,
+      topCohortLoyalty,
+      lowCohortLoyalty,
+      highlight
     };
   }
 
@@ -543,6 +834,7 @@
     renderInventory();
     renderPrices();
     renderStaff();
+    renderReport();
     renderLog();
   }
 
@@ -621,6 +913,46 @@
           </div>
         `;
       })
+      .join("");
+  }
+
+  function renderReport() {
+    const topCohort = COHORT_PROFILES[state.lastReport.topCohort] || COHORT_PROFILES.locals;
+    const lowCohort = COHORT_PROFILES[state.lastReport.lowCohort] || COHORT_PROFILES.locals;
+    const lowStock = Object.entries(state.inventory)
+      .filter(([, amount]) => amount < 10)
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, 4)
+      .map(([item, amount]) => `${item}(${amount})`);
+
+    const netPrefix = state.lastNet >= 0 ? "+" : "";
+    const lines = [
+      {
+        tone: state.lastNet >= 0 ? "good" : "bad",
+        text: `Finance: ${formatCoin(state.lastRevenue)} revenue, ${formatCoin(state.lastExpenses)} expenses, ${netPrefix}${formatCoin(state.lastNet)} net.`
+      },
+      {
+        tone: lowStock.length === 0 ? "good" : "bad",
+        text:
+          lowStock.length === 0
+            ? "Operations: no critical low-stock items."
+            : `Operations: low stock ${lowStock.join(", ")}.`
+      },
+      {
+        tone:
+          state.lastReport.topCohortLoyalty - state.lastReport.lowCohortLoyalty >= 8
+            ? "good"
+            : "neutral",
+        text: `Sentiment: ${topCohort.label} loyalty ${state.lastReport.topCohortLoyalty}, ${lowCohort.label} loyalty ${state.lastReport.lowCohortLoyalty}.`
+      },
+      {
+        tone: "neutral",
+        text: `Patron watch: ${state.lastReport.highlight} Loyalty demand factor ${state.lastReport.loyaltyDemandMult.toFixed(2)}x.`
+      }
+    ];
+
+    el.reportView.innerHTML = lines
+      .map((line) => `<div class="report-line ${line.tone}">${line.text}</div>`)
       .join("");
   }
 
