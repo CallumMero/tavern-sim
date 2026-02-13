@@ -1,137 +1,24 @@
-const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+import { createRandomController } from "./random.js";
+import {
+  DAY_NAMES,
+  ROLE_TEMPLATES,
+  PRICE_DEFAULTS,
+  ROTA_PRESETS,
+  ROLE_SHIFT_BIAS,
+  COHORT_PROFILES,
+  PRODUCT_LABELS,
+  PATRON_FIRST_NAMES,
+  PATRON_LAST_NAMES,
+  SUPPLY_META
+} from "./config.js";
 
-  const ROLE_TEMPLATES = {
-    server: { wage: 8, service: 16, quality: 2 },
-    cook: { wage: 11, service: 8, quality: 7 },
-    barkeep: { wage: 12, service: 14, quality: 6 },
-    guard: { wage: 10, service: 6, quality: 3 }
-  };
+const SAVE_SCHEMA_VERSION = 1;
 
-  const PRICE_DEFAULTS = {
-    ale: 6,
-    mead: 8,
-    stew: 10,
-    bread: 4,
-    room: 16
-  };
+const random = createRandomController();
+const changeListeners = [];
 
-  const ROTA_PRESETS = {
-    balanced: { label: "Balanced", nightShare: 0.5 },
-    day_heavy: { label: "Day Heavy", nightShare: 0.35 },
-    night_heavy: { label: "Night Heavy", nightShare: 0.65 }
-  };
-
-  const ROLE_SHIFT_BIAS = {
-    server: 0.06,
-    cook: -0.12,
-    barkeep: 0.22,
-    guard: 0.28
-  };
-
-  const COHORT_PROFILES = {
-    locals: {
-      label: "Locals",
-      weight: 0.38,
-      preferredProducts: ["ale", "bread", "stew"],
-      priceSensitivity: 1.25,
-      qualityNeed: 48
-    },
-    adventurers: {
-      label: "Adventurers",
-      weight: 0.26,
-      preferredProducts: ["ale", "stew", "room"],
-      priceSensitivity: 0.95,
-      qualityNeed: 52
-    },
-    merchants: {
-      label: "Merchants",
-      weight: 0.22,
-      preferredProducts: ["mead", "bread", "room"],
-      priceSensitivity: 1.05,
-      qualityNeed: 56
-    },
-    nobles: {
-      label: "Nobles",
-      weight: 0.14,
-      preferredProducts: ["mead", "room", "stew"],
-      priceSensitivity: 0.65,
-      qualityNeed: 66
-    }
-  };
-
-  const PRODUCT_LABELS = {
-    ale: "ale",
-    mead: "mead",
-    stew: "stew",
-    bread: "bread",
-    room: "rooms"
-  };
-
-  const PATRON_FIRST_NAMES = [
-    "Alda",
-    "Bram",
-    "Cora",
-    "Dain",
-    "Elsa",
-    "Fenn",
-    "Galen",
-    "Hilda",
-    "Iris",
-    "Joren",
-    "Kara",
-    "Lio",
-    "Mira",
-    "Nolan",
-    "Orrin",
-    "Pella",
-    "Quin",
-    "Rhea",
-    "Soren",
-    "Tamsin",
-    "Ulric",
-    "Vera",
-    "Wren",
-    "Yara"
-  ];
-
-  const PATRON_LAST_NAMES = [
-    "Ashford",
-    "Briar",
-    "Crowley",
-    "Dunlop",
-    "Eldergrove",
-    "Falk",
-    "Grimsby",
-    "Hearth",
-    "Ironwell",
-    "Juniper",
-    "Kettle",
-    "Longstep",
-    "Morrow",
-    "Northmill",
-    "Oakley",
-    "Piper",
-    "Quickwater",
-    "Rook",
-    "Stormer",
-    "Thorn",
-    "Umber",
-    "Vale",
-    "Westfall",
-    "Yew"
-  ];
-
-  const SUPPLY_META = {
-    grain: { label: "Grain", baseQuality: 60, qualityVariance: 14, lossMin: 2, lossMax: 4, spoilAt: 18 },
-    hops: { label: "Hops", baseQuality: 62, qualityVariance: 13, lossMin: 2, lossMax: 5, spoilAt: 20 },
-    honey: { label: "Honey", baseQuality: 66, qualityVariance: 10, lossMin: 1, lossMax: 2, spoilAt: 8 },
-    meat: { label: "Meat", baseQuality: 58, qualityVariance: 16, lossMin: 5, lossMax: 9, spoilAt: 38 },
-    veg: { label: "Veg", baseQuality: 61, qualityVariance: 14, lossMin: 4, lossMax: 8, spoilAt: 34 },
-    bread: { label: "Bread", baseQuality: 63, qualityVariance: 12, lossMin: 5, lossMax: 8, spoilAt: 40 },
-    wood: { label: "Wood", baseQuality: 72, qualityVariance: 8, lossMin: 0, lossMax: 1, spoilAt: -1 }
-  };
-
-const state = {
+function createInitialState() {
+  return {
     day: 1,
     gold: 260,
     reputation: 45,
@@ -180,8 +67,11 @@ const state = {
     },
     log: []
   };
+}
 
-let onChange = () => {};
+const state = createInitialState();
+const stateTemplate = cloneData(state);
+
 let initialized = false;
 
   function clamp(value, min, max) {
@@ -189,11 +79,11 @@ let initialized = false;
   }
 
   function randInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+    return random.randomInt(min, max);
   }
 
   function pick(arr) {
-    return arr[randInt(0, arr.length - 1)];
+    return random.pick(arr);
   }
 
   function formatCoin(value) {
@@ -204,7 +94,7 @@ let initialized = false;
   function createStaff(role) {
     const tpl = ROLE_TEMPLATES[role];
     return {
-      id: `${role}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `${role}-${random.randomId(6)}`,
       role,
       wage: tpl.wage + randInt(-1, 2),
       service: clamp(tpl.service + randInt(-3, 3), 4, 25),
@@ -260,7 +150,7 @@ let initialized = false;
     const last = PATRON_LAST_NAMES[randInt(0, PATRON_LAST_NAMES.length - 1)];
     const preference = pick(profile.preferredProducts);
     return {
-      id: `patron-${index}-${Math.random().toString(36).slice(2, 7)}`,
+      id: `patron-${index}-${random.randomId(5)}`,
       name: `${first} ${last}`,
       cohort,
       preference,
@@ -270,7 +160,7 @@ let initialized = false;
   }
 
   function pickWeightedCohort() {
-    const roll = Math.random();
+    const roll = random.nextFloat();
     let threshold = 0;
     for (const cohort in COHORT_PROFILES) {
       threshold += COHORT_PROFILES[cohort].weight;
@@ -603,7 +493,7 @@ function repairTavern() {
         0.08,
         0.92
       );
-      person.assignedShift = Math.random() < nightChance ? "night" : "day";
+      person.assignedShift = random.nextFloat() < nightChance ? "night" : "day";
       if (person.assignedShift === "night") {
         nightAssigned += 1;
       } else {
@@ -648,7 +538,7 @@ function repairTavern() {
       person.fatigue = clamp(person.fatigue + fatigueGain - satisfactionRelief, 0, 100);
       fatigueTotal += person.fatigue;
 
-      if (person.fatigue >= 84 && Math.random() < 0.09) {
+      if (person.fatigue >= 84 && random.nextFloat() < 0.09) {
         person.injuryDays = randInt(2, 4);
         person.morale = clamp(person.morale - randInt(4, 8), 0, 100);
         newInjuries += 1;
@@ -656,7 +546,7 @@ function repairTavern() {
         return;
       }
 
-      if (person.fatigue >= 76 && person.morale < 48 && Math.random() < 0.12) {
+      if (person.fatigue >= 76 && person.morale < 48 && random.nextFloat() < 0.12) {
         person.disputeDays = randInt(1, 3);
         person.morale = clamp(person.morale - randInt(3, 7), 0, 100);
         newDisputes += 1;
@@ -1052,7 +942,7 @@ function repairTavern() {
       condition: 0
     };
 
-    if (Math.random() < 0.5) {
+    if (random.nextFloat() < 0.5) {
       return mods;
     }
 
@@ -1118,7 +1008,7 @@ function repairTavern() {
   }
 
 function render() {
-  onChange();
+  changeListeners.forEach((listener) => listener());
 }
 
 function logLine(message, tone) {
@@ -1128,8 +1018,113 @@ function logLine(message, tone) {
   }
 }
 
+function cloneData(value) {
+  if (typeof structuredClone === "function") {
+    return structuredClone(value);
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
+function mergeWithTemplate(template, source) {
+  if (Array.isArray(template)) {
+    return Array.isArray(source) ? cloneData(source) : cloneData(template);
+  }
+  if (template && typeof template === "object") {
+    const output = {};
+    const sourceObject = source && typeof source === "object" ? source : {};
+    for (const key in template) {
+      output[key] = mergeWithTemplate(template[key], sourceObject[key]);
+    }
+    for (const key in sourceObject) {
+      if (!(key in output)) {
+        output[key] = cloneData(sourceObject[key]);
+      }
+    }
+    return output;
+  }
+  return source === undefined ? template : source;
+}
+
+function applyStateSnapshot(snapshot) {
+  const next = cloneData(snapshot);
+  for (const key in state) {
+    delete state[key];
+  }
+  Object.assign(state, next);
+}
+
+function saveGame() {
+  return {
+    version: SAVE_SCHEMA_VERSION,
+    savedAt: new Date().toISOString(),
+    random: random.snapshot(),
+    state: cloneData(state)
+  };
+}
+
+function loadGame(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return { ok: false, error: "Missing save payload." };
+  }
+  if (snapshot.version !== SAVE_SCHEMA_VERSION) {
+    return {
+      ok: false,
+      error: `Save version ${snapshot.version} is not compatible with ${SAVE_SCHEMA_VERSION}.`
+    };
+  }
+
+  const merged = mergeWithTemplate(stateTemplate, snapshot.state);
+  applyStateSnapshot(merged);
+  random.restore(snapshot.random);
+  initialized = true;
+  logLine(`Loaded campaign snapshot (Day ${state.day}).`, "neutral");
+  render();
+  return { ok: true };
+}
+
+function setRandomSeed(seedLike) {
+  const ok = random.setSeed(seedLike);
+  if (!ok) {
+    return false;
+  }
+  return true;
+}
+
+function clearRandomSeed() {
+  random.clearSeed();
+}
+
+function startNewGame(seedLike = null) {
+  if (seedLike === null || seedLike === undefined || seedLike === "") {
+    clearRandomSeed();
+  } else if (!setRandomSeed(seedLike)) {
+    return { ok: false, error: "Seed must be a valid number." };
+  }
+
+  applyStateSnapshot(createInitialState());
+  initialized = false;
+  initGame();
+  return { ok: true };
+}
+
+function subscribeOnChange(listener) {
+  if (typeof listener !== "function") {
+    return () => {};
+  }
+  changeListeners.push(listener);
+  return () => {
+    const index = changeListeners.indexOf(listener);
+    if (index >= 0) {
+      changeListeners.splice(index, 1);
+    }
+  };
+}
+
 function setOnChange(listener) {
-  onChange = typeof listener === "function" ? listener : () => {};
+  changeListeners.length = 0;
+  if (typeof listener === "function") {
+    changeListeners.push(listener);
+  }
 }
 
 function initGame() {
@@ -1152,8 +1147,14 @@ export {
   state,
   initGame,
   setOnChange,
+  subscribeOnChange,
   formatCoin,
   qualityTier,
+  saveGame,
+  loadGame,
+  setRandomSeed,
+  clearRandomSeed,
+  startNewGame,
   getStaffStats,
   setRotaPreset,
   adjustPrice,

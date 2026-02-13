@@ -11,8 +11,11 @@ The project uses a three-piece architecture so it can scale without introducing 
 ## Current Structure
 
 - `src/main.js`: static entrypoint loaded by `index.html`
-- `src/runtime/startApp.js`: starts UI and engine, exposes debug handle
-- `src/engine/gameEngine.js`: game state + all business rules and actions
+- `src/runtime/startApp.js`: starts UI and engine, wires persistence, exposes debug handle
+- `src/runtime/persistence.js`: storage adapter for versioned save snapshots
+- `src/engine/gameEngine.js`: game state + business rules + save/load boundaries
+- `src/engine/random.js`: deterministic RNG controller (seeded or system mode)
+- `src/engine/config.js`: tunable simulation constants and content lists
 - `src/ui/gameUI.js`: button bindings and panel rendering
 
 ## Layer Boundaries
@@ -25,9 +28,25 @@ The project uses a three-piece architecture so it can scale without introducing 
 
 - Keep simulation rules side-effect free except state mutation and log output.
 - Keep balancing constants centralized near engine module top.
-- Add seeded RNG next, so simulation balancing can be reproduced from a seed.
-- Introduce save/load serialization boundaries before Milestone 2 world systems.
-- Move large content lists (events, cohorts, items) into `src/content/` JSON modules.
+- Seeded RNG support is now available for reproducible balancing.
+- Save/load serialization boundaries now use a versioned snapshot schema (`SAVE_SCHEMA_VERSION`).
+- Next split target: move large content lists (events, cohorts, items) into `src/content/` JSON modules.
+- Next split target: break `gameEngine.js` into domain modules (`staff`, `inventory`, `patrons`, `events`, `economy`).
+
+## Persistence Contract
+
+- Storage key: `tavern-sim.save.v1`
+- Snapshot envelope:
+  - `version`: schema version integer
+  - `savedAt`: ISO timestamp
+  - `random`: RNG controller snapshot (`mode`, `seed`, `state`)
+  - `state`: game state payload
+
+## Deterministic Simulation
+
+- RNG mode defaults to system randomness.
+- New seeded runs are created through `startNewGame(seed)` (debug handle: `window.tavernSim.newGame(seed)`).
+- Save snapshots preserve RNG state so reloaded runs continue deterministically.
 
 ## Deployment
 

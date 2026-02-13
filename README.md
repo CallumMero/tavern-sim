@@ -13,10 +13,16 @@ No build step is required.
 The codebase is split into three layers:
 
 - `src/runtime/` controls app startup and environment wiring
-- `src/engine/` contains simulation state and game logic
+- `src/engine/` contains simulation state, deterministic RNG, and game logic
 - `src/ui/` owns DOM bindings and rendering
 
 Entry point: `src/main.js`
+
+Key runtime capabilities:
+
+- Auto-load from browser storage on startup (if a save exists)
+- Auto-save on each engine state change
+- Debug console handle at `window.tavernSim` (`save`, `load`, `newGame(seed)`)
 
 ## Current Vertical Slice
 
