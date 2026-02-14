@@ -24,6 +24,7 @@ The project uses a three-piece architecture so it can scale without introducing 
 - `src/engine/economyEngine.js`: pricing demand curve and inventory sale helpers
 - `src/ui/gameUI.js`: button bindings and panel rendering
 - `src/ui/pixelRenderer.js`: state-driven canvas renderer for pixel tavern visuals
+- `assets/`: source character sprite sheets used by the pixel renderer
 - `scripts/regression/runScenarios.mjs`: deterministic scenario regression runner
 
 ## Layer Boundaries

@@ -41,6 +41,12 @@ Key runtime capabilities:
 - Live pixel-art tavern scene synced to engine state (staff + guest crowd + day HUD)
 - Wood-and-lantern themed management interface with event log and controls
 
+## Character Assets
+
+- Custom sprite sources are loaded from `/Users/lem/builds/fun/tavern-sim/assets`.
+- The canvas renderer maps those assets to staff roles, patron cohorts, and rotating cameo visitors.
+- If an asset fails to load, the renderer falls back to procedural pixel characters so gameplay remains functional.
+
 ## Next Target
 
 See `docs/ROADMAP.md` for the plan to evolve this into a deep manager-style sim.

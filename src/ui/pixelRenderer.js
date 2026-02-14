@@ -1,6 +1,59 @@
 const SCENE_WIDTH = 320;
 const SCENE_HEIGHT = 180;
 const GUEST_SLOT_COUNT = 16;
+const SPRITE_ALPHA_THRESHOLD = 104;
+
+const CHARACTER_ASSET_FILES = {
+  adventurer_mele: "adventurer (mele).png",
+  adventurer_rogue: "adventurer (rogue).png",
+  bard: "bard.png",
+  barman: "barman.png",
+  blacksmith: "blacksmith.png",
+  cook: "cook.png",
+  guard: "guard.png",
+  guild_inspector: "guild inspector.png",
+  herbologist: "herbologist.png",
+  merchant: "merchant.png",
+  regular: "regular.png",
+  server: "server.png",
+  server_walking: "server_walking.png"
+};
+
+const CHARACTER_SPRITE_HINTS = {
+  adventurer_mele: { mode: "duo" },
+  adventurer_rogue: { mode: "duo" },
+  bard: { mode: "duo" },
+  barman: { mode: "duo" },
+  blacksmith: { mode: "duo" },
+  cook: { mode: "duo" },
+  guard: { mode: "duo" },
+  guild_inspector: { mode: "duo" },
+  herbologist: { mode: "duo" },
+  merchant: { mode: "duo" },
+  regular: { mode: "duo" },
+  server: { mode: "duo" },
+  server_walking: {
+    mode: "grid",
+    cols: 3,
+    rows: 3
+  }
+};
+
+const STAFF_SPRITE_PREFS = {
+  barkeep: ["barman"],
+  cook: ["cook"],
+  server: ["server_walking", "server"],
+  guard: ["guard"]
+};
+
+const COHORT_SPRITE_PREFS = {
+  locals: ["regular"],
+  adventurers: ["adventurer_mele", "adventurer_rogue"],
+  merchants: ["merchant"],
+  nobles: ["guild_inspector", "merchant"]
+};
+
+const CAMEO_SPRITES = ["bard", "blacksmith", "herbologist"];
 
 const STAFF_ROLE_PALETTES = {
   barkeep: {
@@ -95,6 +148,179 @@ function mixColor(a, b, alpha) {
   return `rgb(${out.r}, ${out.g}, ${out.b})`;
 }
 
+function assetUrl(fileName) {
+  return new URL(`../../assets/${fileName}`, import.meta.url).href;
+}
+
+function buildDuoFrames(width, height) {
+  const halfWidth = width / 2;
+  const frames = [];
+  for (let i = 0; i < 2; i += 1) {
+    const cellLeft = i * halfWidth;
+    const frame = {
+      sx: cellLeft + halfWidth * 0.18,
+      sy: height * 0.1,
+      sw: halfWidth * 0.64,
+      sh: height * 0.76
+    };
+    frames.push(frame);
+  }
+  return frames;
+}
+
+function buildGridFrames(width, height, cols, rows) {
+  const frames = [];
+  const cellWidth = width / cols;
+  const cellHeight = height / rows;
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      frames.push({
+        sx: col * cellWidth + cellWidth * 0.2,
+        sy: row * cellHeight + cellHeight * 0.14,
+        sw: cellWidth * 0.6,
+        sh: cellHeight * 0.74
+      });
+    }
+  }
+  return frames;
+}
+
+function getOpaquePixelCount(data, imageWidth, rect, alphaThreshold) {
+  let count = 0;
+  const left = Math.max(0, Math.floor(rect.sx));
+  const top = Math.max(0, Math.floor(rect.sy));
+  const right = Math.min(imageWidth, Math.floor(rect.sx + rect.sw));
+  const bottom = Math.floor(rect.sy + rect.sh);
+  for (let y = top; y < bottom; y += 2) {
+    for (let x = left; x < right; x += 2) {
+      const alpha = data[(y * imageWidth + x) * 4 + 3];
+      if (alpha >= alphaThreshold) {
+        count += 1;
+      }
+    }
+  }
+  return count;
+}
+
+function extractFrames(image, hint) {
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  const mode = hint && hint.mode ? hint.mode : "duo";
+  const candidates = mode === "grid"
+    ? buildGridFrames(width, height, hint.cols || 3, hint.rows || 3)
+    : buildDuoFrames(width, height);
+
+  const probe = document.createElement("canvas");
+  probe.width = width;
+  probe.height = height;
+  const probeCtx = probe.getContext("2d");
+  if (!probeCtx) {
+    return candidates;
+  }
+  probeCtx.drawImage(image, 0, 0);
+  const imageData = probeCtx.getImageData(0, 0, width, height);
+  const validFrames = candidates.filter((frame) => {
+    const opaqueCount = getOpaquePixelCount(
+      imageData.data,
+      width,
+      frame,
+      SPRITE_ALPHA_THRESHOLD
+    );
+    return opaqueCount >= 40;
+  });
+
+  if (validFrames.length > 0) {
+    return validFrames;
+  }
+  return candidates;
+}
+
+function normalizeFrame(frame, image) {
+  const maxWidth = image.naturalWidth || image.width;
+  const maxHeight = image.naturalHeight || image.height;
+  const sx = clamp(frame.sx, 0, maxWidth - 1);
+  const sy = clamp(frame.sy, 0, maxHeight - 1);
+  const sw = clamp(frame.sw, 1, maxWidth - sx);
+  const sh = clamp(frame.sh, 1, maxHeight - sy);
+  return { sx, sy, sw, sh };
+}
+
+function createSpriteLibrary() {
+  const assets = {};
+  let hasLoaded = false;
+  let loadPromise = null;
+
+  function loadAll(onLoaded) {
+    if (loadPromise) {
+      return loadPromise;
+    }
+    const jobs = Object.entries(CHARACTER_ASSET_FILES).map(([key, fileName]) => {
+      return new Promise((resolve) => {
+        const image = new Image();
+        image.onload = () => {
+          const hint = CHARACTER_SPRITE_HINTS[key];
+          const frames = extractFrames(image, hint).map((frame) => normalizeFrame(frame, image));
+          assets[key] = {
+            image,
+            frames
+          };
+          resolve();
+        };
+        image.onerror = () => {
+          resolve();
+        };
+        image.src = assetUrl(fileName);
+      });
+    });
+
+    loadPromise = Promise.all(jobs).then(() => {
+      hasLoaded = true;
+      if (typeof onLoaded === "function") {
+        onLoaded();
+      }
+    });
+    return loadPromise;
+  }
+
+  function getAnimatedFrame(key, time, seed, mode = "idle") {
+    const entry = assets[key];
+    if (!entry || !Array.isArray(entry.frames) || entry.frames.length === 0) {
+      return null;
+    }
+
+    const sequence =
+      mode === "walk" && entry.frames.length > 2
+        ? entry.frames
+        : entry.frames.slice(0, Math.min(2, entry.frames.length));
+    if (sequence.length === 0) {
+      return null;
+    }
+
+    const baseIndex = hashString(`${key}:${seed}`) % sequence.length;
+    const cadence = mode === "walk" ? 150 : 290;
+    const animatedIndex = Math.floor(time / cadence + baseIndex) % sequence.length;
+    return {
+      image: entry.image,
+      frame: sequence[animatedIndex]
+    };
+  }
+
+  return {
+    loadAll,
+    getAnimatedFrame,
+    isReady: () => hasLoaded
+  };
+}
+
+function resolveSpriteKeyByList(seed, candidateKeys) {
+  if (!Array.isArray(candidateKeys) || candidateKeys.length === 0) {
+    return null;
+  }
+  const index = hashString(seed) % candidateKeys.length;
+  return candidateKeys[index];
+}
+
 function resolveCharacterPalette(seed, sourcePalette) {
   const safePalette = sourcePalette || COHORT_PALETTES.locals;
   return {
@@ -159,13 +385,40 @@ function drawCharacter(ctx, args) {
     seed,
     palette,
     mood = 50,
-    unavailable = false
+    unavailable = false,
+    spriteFrame = null,
+    scale = 1
   } = args;
 
   const phase = (hashString(seed) % 1000) / 70;
   const bob = Math.sin(time / 220 + phase) * 0.9;
   const px = Math.round(x);
   const py = Math.round(y + bob);
+
+  if (spriteFrame && spriteFrame.image && spriteFrame.frame) {
+    const spriteWidth = Math.round(16 * scale);
+    const spriteHeight = Math.round(22 * scale);
+    const left = px + Math.round((16 - spriteWidth) / 2);
+    const top = py + Math.round(14 - spriteHeight);
+    drawRect(ctx, "rgba(0, 0, 0, 0.33)", px + 3, py + 14, 10, 2);
+    const frame = spriteFrame.frame;
+    ctx.drawImage(
+      spriteFrame.image,
+      Math.floor(frame.sx),
+      Math.floor(frame.sy),
+      Math.floor(frame.sw),
+      Math.floor(frame.sh),
+      left,
+      top,
+      spriteWidth,
+      spriteHeight
+    );
+    if (unavailable) {
+      drawRect(ctx, "#cf6a6a", px + 2, py + 0, 12, 1);
+      drawRect(ctx, "#cf6a6a", px + 7, py - 2, 1, 5);
+    }
+    return;
+  }
 
   drawRect(ctx, palette.shadow, px + 3, py + 14, 10, 2);
   drawRect(ctx, palette.boots, px + 4, py + 12, 3, 2);
@@ -275,7 +528,7 @@ function getVisiblePatrons(state) {
   return pool.slice(0, desired);
 }
 
-function drawPatronCrowd(ctx, state, time) {
+function drawPatronCrowd(ctx, state, time, spriteLibrary) {
   const patrons = getVisiblePatrons(state);
   const guestSlots = [
     { x: 92, y: 92 }, { x: 110, y: 96 }, { x: 132, y: 96 }, { x: 152, y: 100 },
@@ -290,18 +543,46 @@ function drawPatronCrowd(ctx, state, time) {
       patron.id,
       COHORT_PALETTES[patron.cohort]
     );
+    const spriteKey = resolveSpriteKeyByList(
+      patron.id,
+      COHORT_SPRITE_PREFS[patron.cohort]
+    );
+    const spriteFrame = spriteKey
+      ? spriteLibrary.getAnimatedFrame(spriteKey, time, patron.id, "idle")
+      : null;
     drawCharacter(ctx, {
       x: slot.x,
       y: slot.y,
       time,
       seed: patron.id,
       palette,
-      mood: patron.loyalty
+      mood: patron.loyalty,
+      spriteFrame,
+      scale: 1.02
     });
   });
 }
 
-function drawStaff(ctx, state, time) {
+function drawCameoCharacters(ctx, state, time, spriteLibrary) {
+  const cameoSeed = `cameo:${state.day}`;
+  const cameoKey = CAMEO_SPRITES[hashString(cameoSeed) % CAMEO_SPRITES.length];
+  const cameoFrame = spriteLibrary.getAnimatedFrame(cameoKey, time, cameoSeed, "idle");
+  if (!cameoFrame) {
+    return;
+  }
+  drawCharacter(ctx, {
+    x: 263,
+    y: 90,
+    time,
+    seed: cameoSeed,
+    palette: resolveCharacterPalette(cameoSeed, COHORT_PALETTES.adventurers),
+    mood: 70,
+    spriteFrame,
+    scale: 1.1
+  });
+}
+
+function drawStaff(ctx, state, time, spriteLibrary) {
   const roleCounts = {};
   state.staff.forEach((person) => {
     const roleCount = roleCounts[person.role] || 0;
@@ -312,6 +593,14 @@ function drawStaff(ctx, state, time) {
       person.id,
       STAFF_ROLE_PALETTES[person.role] || STAFF_ROLE_PALETTES.server
     );
+    const spriteKey = resolveSpriteKeyByList(
+      person.id,
+      STAFF_SPRITE_PREFS[person.role]
+    );
+    const motionMode = person.role === "server" ? "walk" : "idle";
+    const spriteFrame = spriteKey
+      ? spriteLibrary.getAnimatedFrame(spriteKey, time, person.id, motionMode)
+      : null;
     drawCharacter(ctx, {
       x: slot.x,
       y: slot.y,
@@ -319,7 +608,9 @@ function drawStaff(ctx, state, time) {
       seed: person.id,
       palette,
       mood: person.morale,
-      unavailable: person.injuryDays > 0 || person.disputeDays > 0
+      unavailable: person.injuryDays > 0 || person.disputeDays > 0,
+      spriteFrame,
+      scale: 1.08
     });
   });
 }
@@ -378,10 +669,12 @@ export function createPixelRenderer(canvas) {
   canvas.height = SCENE_HEIGHT;
   canvas.style.imageRendering = "pixelated";
   ctx.imageSmoothingEnabled = false;
+  const spriteLibrary = createSpriteLibrary();
 
   let stateRef = null;
   let frameHandle = null;
   let running = false;
+  let lastFrameTime = 0;
 
   function drawFrame(timestamp) {
     if (!stateRef) {
@@ -389,18 +682,29 @@ export function createPixelRenderer(canvas) {
       return;
     }
 
-    drawBackdrop(ctx, stateRef, timestamp);
-    drawPatronCrowd(ctx, stateRef, timestamp);
-    drawStaff(ctx, stateRef, timestamp);
+    const resolvedTime = Number.isFinite(timestamp) ? timestamp : lastFrameTime;
+    drawBackdrop(ctx, stateRef, resolvedTime);
+    drawPatronCrowd(ctx, stateRef, resolvedTime, spriteLibrary);
+    drawCameoCharacters(ctx, stateRef, resolvedTime, spriteLibrary);
+    drawStaff(ctx, stateRef, resolvedTime, spriteLibrary);
     drawHud(ctx, stateRef);
   }
 
   function tick(timestamp) {
+    lastFrameTime = timestamp;
     drawFrame(timestamp);
     if (running) {
       frameHandle = requestAnimationFrame(tick);
     }
   }
+
+  spriteLibrary.loadAll(() => {
+    if (running) {
+      drawFrame(lastFrameTime);
+    } else {
+      drawFrame(0);
+    }
+  });
 
   return {
     render: (nextState) => {

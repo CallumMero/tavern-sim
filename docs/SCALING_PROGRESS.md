@@ -152,6 +152,28 @@ Validation:
 - `node --check src/ui/gameUI.js`
 - `node scripts/regression/runScenarios.mjs` (5/5 scenarios passed)
 
+## 2026-02-14: Character Asset Integration
+
+Completed:
+
+- Added asset-driven sprite loading in `src/ui/pixelRenderer.js`.
+- Added role/cohort sprite mapping:
+  - staff: barkeep/cook/server/guard
+  - patrons: locals/adventurers/merchants/nobles
+- Added rotating cameo character rendering from non-roster assets (`bard`, `blacksmith`, `herbologist`).
+- Added renderer fallback behavior so missing/broken sprite assets use procedural pixel characters.
+
+Files:
+
+- `assets/*.png`
+- `src/ui/pixelRenderer.js`
+- `README.md`
+
+Validation:
+
+- `node --check src/ui/pixelRenderer.js`
+- `node scripts/regression/runScenarios.mjs` (5/5 scenarios passed)
+
 ## Next Work Items
 
 - Move large static content payloads into dedicated `src/content/` modules.
