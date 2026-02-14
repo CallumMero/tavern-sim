@@ -1,6 +1,6 @@
 # Tavern Sim
 
-A text-first, UI-driven fantasy tavern simulator with retro styling.
+A text-first, UI-driven fantasy tavern simulator with a warm wooden tavern presentation.
 
 ## Run
 
@@ -39,7 +39,7 @@ Key runtime capabilities:
 - Ingredient quality/freshness tracking with spoilage impact on production
 - Daily report summaries for finance, operations, staffing, and guest sentiment
 - Live pixel-art tavern scene synced to engine state (staff + guest crowd + day HUD)
-- Retro interface with event log and management controls
+- Wood-and-lantern themed management interface with event log and controls
 
 ## Next Target
 

@@ -127,6 +127,31 @@ Validation:
 - `node --check src/ui/gameUI.js`
 - `node --check src/runtime/startApp.js`
 
+## 2026-02-14: Tavern Art-Direction Pass (Wood/Amber Theme)
+
+Completed:
+
+- Reworked global UI styling to emphasize a wooden fantasy tavern mood:
+  - warm amber lighting
+  - dark wood paneling
+  - brass/iron accents
+  - parchment-like data surfaces
+- Retuned canvas scene palette and backdrop composition to match the same art direction.
+- Added lantern glow treatment and warmer HUD styling in the pixel renderer.
+- Kept gameplay controls/flows unchanged while raising visual cohesion.
+
+Files:
+
+- `styles.css`
+- `src/ui/pixelRenderer.js`
+- `README.md`
+
+Validation:
+
+- `node --check src/ui/pixelRenderer.js`
+- `node --check src/ui/gameUI.js`
+- `node scripts/regression/runScenarios.mjs` (5/5 scenarios passed)
+
 ## Next Work Items
 
 - Move large static content payloads into dedicated `src/content/` modules.

@@ -4,52 +4,52 @@ const GUEST_SLOT_COUNT = 16;
 
 const STAFF_ROLE_PALETTES = {
   barkeep: {
-    outfit: ["#5f8fc4", "#4d79b0", "#6ea0d1"],
-    trim: ["#d4b466", "#c8a24c"],
+    outfit: ["#7d4e2e", "#6f4529", "#8f5b35"],
+    trim: ["#d0a15a", "#c48e46"],
     hair: ["#4e2e1f", "#734a2f", "#2f1f17"]
   },
   cook: {
-    outfit: ["#c7d2dc", "#a8b5bf", "#d7dee6"],
-    trim: ["#7c8d99", "#6d7f8b"],
+    outfit: ["#d5c5a8", "#c8b792", "#e0d1b6"],
+    trim: ["#8d6c4e", "#795a41"],
     hair: ["#47332a", "#5f4537", "#2a1d17"]
   },
   server: {
-    outfit: ["#5fa879", "#4f9469", "#70b689"],
-    trim: ["#d8c17f", "#c8ad5d"],
+    outfit: ["#6f5a35", "#604d2f", "#7f6940"],
+    trim: ["#d6b47a", "#c59f62"],
     hair: ["#54362a", "#7a5139", "#2f211a"]
   },
   guard: {
-    outfit: ["#7c74bf", "#6a61a8", "#9088d4"],
-    trim: ["#c9cfe0", "#aab4cc"],
+    outfit: ["#5a4f40", "#4c4235", "#6a5d4a"],
+    trim: ["#b59c72", "#a18862"],
     hair: ["#2f2f3f", "#47495f", "#1e2030"]
   }
 };
 
 const COHORT_PALETTES = {
   locals: {
-    outfit: ["#7e9b5f", "#6b8750", "#93ad74"],
-    trim: ["#d6c48d", "#c8b072"],
+    outfit: ["#6d5736", "#5b482d", "#7d6641"],
+    trim: ["#d1b178", "#c39d65"],
     hair: ["#4e372a", "#634734", "#2d1f17"]
   },
   adventurers: {
-    outfit: ["#6f8ecf", "#5c79b8", "#8aa4dc"],
-    trim: ["#dbcb94", "#c9b46f"],
+    outfit: ["#6f4d35", "#5f412d", "#835a3d"],
+    trim: ["#dbc48a", "#c9ad6f"],
     hair: ["#3d2e24", "#553f30", "#221913"]
   },
   merchants: {
-    outfit: ["#9f76bc", "#8e68a8", "#b389cf"],
-    trim: ["#dfd3a5", "#cdbf8c"],
+    outfit: ["#6e4434", "#5d392d", "#7c4f3c"],
+    trim: ["#dfc38f", "#d1b078"],
     hair: ["#553a2f", "#6e4b3b", "#2f221a"]
   },
   nobles: {
-    outfit: ["#ca6f86", "#b95f76", "#d7859b"],
-    trim: ["#ecd8a8", "#d9c38d"],
+    outfit: ["#7f4333", "#70392b", "#93503d"],
+    trim: ["#ecd3a0", "#dcbf87"],
     hair: ["#3d2d2d", "#5a4141", "#241b1b"]
   }
 };
 
-const SKIN_TONES = ["#f6d5be", "#edc39f", "#dda986", "#c99372"];
-const BOOT_COLORS = ["#3c2e2a", "#2e2a3c", "#3a3325"];
+const SKIN_TONES = ["#f4d2b9", "#e8bf98", "#d8a67d", "#c28d69"];
+const BOOT_COLORS = ["#32231b", "#402b1f", "#2b1e17"];
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -186,27 +186,57 @@ function drawCharacter(ctx, args) {
 }
 
 function drawBackdrop(ctx, state, time) {
-  drawRect(ctx, "#1a2530", 0, 0, SCENE_WIDTH, SCENE_HEIGHT);
-  drawRect(ctx, "#223341", 0, 0, SCENE_WIDTH, 52);
-  drawRect(ctx, "#2a3f50", 0, 52, SCENE_WIDTH, 20);
-  drawRect(ctx, "#384f61", 0, 72, SCENE_WIDTH, SCENE_HEIGHT - 72);
+  drawRect(ctx, "#1a1009", 0, 0, SCENE_WIDTH, SCENE_HEIGHT);
+  drawRect(ctx, "#2b1a0f", 0, 0, SCENE_WIDTH, 52);
+  drawRect(ctx, "#3b2413", 0, 52, SCENE_WIDTH, 20);
+  drawRect(ctx, "#4d2e19", 0, 72, SCENE_WIDTH, SCENE_HEIGHT - 72);
+
+  for (let beamX = 0; beamX < SCENE_WIDTH; beamX += 42) {
+    drawRect(ctx, "#25160c", beamX, 0, 10, 72);
+    drawRect(ctx, "#4b2e19", beamX + 3, 0, 1, 72);
+  }
+
+  for (let beamY = 10; beamY < 64; beamY += 18) {
+    drawRect(ctx, "#26160d", 0, beamY, SCENE_WIDTH, 5);
+    drawRect(ctx, "#422613", 0, beamY + 1, SCENE_WIDTH, 1);
+  }
 
   for (let y = 72; y < SCENE_HEIGHT; y += 16) {
     for (let x = 0; x < SCENE_WIDTH; x += 16) {
-      const tile = ((x / 16 + y / 16) % 2 === 0) ? "#3d5667" : "#425d70";
+      const tile = ((x / 16 + y / 16) % 2 === 0) ? "#5a351d" : "#633b20";
       drawRect(ctx, tile, x, y, 16, 16);
+      drawRect(ctx, "#402413", x + 7, y, 1, 16);
     }
   }
 
-  drawRect(ctx, "#5d422c", 0, 58, 228, 14);
-  drawRect(ctx, "#876142", 0, 58, 228, 3);
-  drawRect(ctx, "#6f4f35", 238, 52, 82, 20);
-  drawRect(ctx, "#2d3f50", 24, 104, 28, 56);
-  drawRect(ctx, "#142130", 26, 106, 24, 52);
+  drawRect(ctx, "#6a4024", 0, 58, 228, 14);
+  drawRect(ctx, "#8e5b36", 0, 58, 228, 3);
+  drawRect(ctx, "#55321d", 238, 52, 82, 20);
+  drawRect(ctx, "#5a351f", 24, 104, 28, 56);
+  drawRect(ctx, "#2a170e", 26, 106, 24, 52);
 
   const firePulse = 0.45 + Math.sin(time / 180) * 0.2;
-  drawRect(ctx, mixColor("#ffcb75", "#ff8b3d", firePulse), 286, 58, 9, 11);
-  drawRect(ctx, "#56424a", 280, 52, 22, 20);
+  drawRect(ctx, mixColor("#ffce79", "#ff7f28", firePulse), 286, 58, 9, 11);
+  drawRect(ctx, "#493329", 280, 52, 22, 20);
+
+  drawRect(ctx, mixColor("#ffdf9c", "#ff9c42", firePulse), 72, 21, 6, 8);
+  drawRect(ctx, "#4d3628", 70, 18, 10, 12);
+  drawRect(ctx, mixColor("#ffdf9c", "#ff9c42", firePulse), 154, 17, 6, 8);
+  drawRect(ctx, "#4d3628", 152, 14, 10, 12);
+  drawRect(ctx, mixColor("#ffdf9c", "#ff9c42", firePulse), 236, 22, 6, 8);
+  drawRect(ctx, "#4d3628", 234, 19, 10, 12);
+
+  const lanternGlow = (x, y, radius, alpha) => {
+    const glow = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    glow.addColorStop(0, `rgba(255, 199, 120, ${alpha})`);
+    glow.addColorStop(1, "rgba(255, 140, 60, 0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  };
+  lanternGlow(75, 24, 38, 0.22 + firePulse * 0.14);
+  lanternGlow(157, 20, 42, 0.2 + firePulse * 0.16);
+  lanternGlow(239, 25, 36, 0.2 + firePulse * 0.12);
+  lanternGlow(289, 64, 44, 0.24 + firePulse * 0.18);
 
   const tableSlots = [
     { x: 88, y: 108 },
@@ -215,17 +245,17 @@ function drawBackdrop(ctx, state, time) {
     { x: 244, y: 122 }
   ];
   tableSlots.forEach((slot) => {
-    drawRect(ctx, "#6a4b33", slot.x, slot.y, 26, 12);
-    drawRect(ctx, "#8b6446", slot.x, slot.y, 26, 2);
+    drawRect(ctx, "#774829", slot.x, slot.y, 26, 12);
+    drawRect(ctx, "#99633b", slot.x, slot.y, 26, 2);
   });
 
-  drawRect(ctx, "#5a4837", 272, 108, 34, 42);
-  drawRect(ctx, "#7f674e", 272, 108, 34, 3);
+  drawRect(ctx, "#603a23", 272, 108, 34, 42);
+  drawRect(ctx, "#8b5a37", 272, 108, 34, 3);
 
   if (state.lastNet < 0) {
-    drawRect(ctx, "#aa3f4b", 6, 6, 46, 12);
+    drawRect(ctx, "#8f2f3a", 6, 6, 46, 12);
   } else {
-    drawRect(ctx, "#468d67", 6, 6, 46, 12);
+    drawRect(ctx, "#5e6e37", 6, 6, 46, 12);
   }
 }
 
@@ -296,30 +326,30 @@ function drawStaff(ctx, state, time) {
 
 function drawHud(ctx, state) {
   ctx.font = "8px monospace";
-  ctx.fillStyle = "#e8dec0";
+  ctx.fillStyle = "#f3dfba";
   ctx.fillText(`DAY ${state.day}`, 10, 14);
   ctx.fillText(`GOLD ${Math.round(state.gold)}g`, 10, 24);
   ctx.fillText(`REP ${state.reputation}`, 10, 34);
   ctx.fillText(`GUESTS ${state.lastGuests}`, 10, 44);
 
-  ctx.fillStyle = "#142130";
+  ctx.fillStyle = "#2a170d";
   ctx.fillRect(6, 150, 308, 24);
-  ctx.strokeStyle = "#4f6274";
+  ctx.strokeStyle = "#7f5734";
   ctx.strokeRect(6, 150, 308, 24);
 
   const sentiment = state.lastReport && state.lastReport.highlight
     ? state.lastReport.highlight
     : "Welcome to the guild quarter tavern.";
 
-  ctx.fillStyle = "#d8e4ef";
+  ctx.fillStyle = "#f5e5c4";
   ctx.font = "7px monospace";
   const clipped = sentiment.length > 68 ? `${sentiment.slice(0, 68)}...` : sentiment;
   ctx.fillText(clipped, 12, 164);
 }
 
 function drawBootScreen(ctx) {
-  drawRect(ctx, "#0f1721", 0, 0, SCENE_WIDTH, SCENE_HEIGHT);
-  ctx.fillStyle = "#d8e4ef";
+  drawRect(ctx, "#1d120a", 0, 0, SCENE_WIDTH, SCENE_HEIGHT);
+  ctx.fillStyle = "#f3dfba";
   ctx.font = "10px monospace";
   ctx.fillText("TAVERN SIM VISUAL LAYER", 58, 80);
   ctx.font = "8px monospace";
