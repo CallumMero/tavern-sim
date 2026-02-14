@@ -20,6 +20,7 @@ import {
   repairTavern,
   advanceDay
 } from "../engine/gameEngine.js";
+import { createPixelRenderer } from "./pixelRenderer.js";
 
 function byId(id, documentRef) {
   return documentRef.getElementById(id);
@@ -27,6 +28,7 @@ function byId(id, documentRef) {
 
 export function createGameUI(documentRef = document) {
   const el = {
+    sceneCanvas: byId("sceneCanvas", documentRef),
     topStats: byId("topStats", documentRef),
     inventoryView: byId("inventoryView", documentRef),
     priceView: byId("priceView", documentRef),
@@ -34,13 +36,23 @@ export function createGameUI(documentRef = document) {
     reportView: byId("reportView", documentRef),
     logView: byId("logView", documentRef)
   };
+  const pixelRenderer = createPixelRenderer(el.sceneCanvas);
 
   bindActions(documentRef, el);
-  setOnChange(() => render(el));
+  setOnChange(() => {
+    render(el);
+    pixelRenderer.render(state);
+  });
   render(el);
+  pixelRenderer.render(state);
+  pixelRenderer.start();
 
   return {
-    render: () => render(el)
+    render: () => {
+      render(el);
+      pixelRenderer.render(state);
+    },
+    destroy: () => pixelRenderer.destroy()
   };
 }
 

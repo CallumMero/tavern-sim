@@ -157,6 +157,29 @@ button.primary {
   margin-bottom: 0.75rem;
 }
 
+.scene-shell {
+  border: 1px solid var(--line);
+  background: #111c26;
+  padding: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+#sceneCanvas {
+  display: block;
+  width: 100%;
+  max-height: 54vh;
+  border: 2px solid #435c70;
+  background: #0d141d;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.scene-caption {
+  margin: 0.4rem 0 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
 .kv-list,
 .staff-list,
 .price-list {

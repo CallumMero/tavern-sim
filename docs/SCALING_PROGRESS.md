@@ -102,6 +102,31 @@ Validation:
 - `node --check scripts/regression/runScenarios.mjs`
 - `node scripts/regression/runScenarios.mjs` (5/5 scenarios passed)
 
+## 2026-02-14: Pixel Visual Layer Scaffold
+
+Completed:
+
+- Added a browser-native canvas renderer (`src/ui/pixelRenderer.js`) with no build dependency.
+- Added a live pixel scene panel to `index.html` and responsive styling in `styles.css`.
+- Wired the renderer into the UI change cycle so every simulation action updates visuals.
+- Added animated staff and patron sprite rendering based on deterministic hashes of entity IDs.
+- Added scene HUD and event-highlight message box backed by engine state.
+
+Files:
+
+- `src/ui/pixelRenderer.js`
+- `src/ui/gameUI.js`
+- `index.html`
+- `styles.css`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+
+Validation:
+
+- `node --check src/ui/pixelRenderer.js`
+- `node --check src/ui/gameUI.js`
+- `node --check src/runtime/startApp.js`
+
 ## Next Work Items
 
 - Move large static content payloads into dedicated `src/content/` modules.

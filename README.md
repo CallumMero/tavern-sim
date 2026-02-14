@@ -14,7 +14,7 @@ The codebase is split into three layers:
 
 - `src/runtime/` controls app startup and environment wiring
 - `src/engine/` contains simulation state, deterministic RNG, and domain logic modules
-- `src/ui/` owns DOM bindings and rendering
+- `src/ui/` owns DOM bindings and rendering (`gameUI.js` + `pixelRenderer.js`)
 
 Entry point: `src/main.js`
 
@@ -38,6 +38,7 @@ Key runtime capabilities:
 - Rota presets with staff fatigue, injuries, and disputes
 - Ingredient quality/freshness tracking with spoilage impact on production
 - Daily report summaries for finance, operations, staffing, and guest sentiment
+- Live pixel-art tavern scene synced to engine state (staff + guest crowd + day HUD)
 - Retro interface with event log and management controls
 
 ## Next Target

@@ -23,6 +23,7 @@ The project uses a three-piece architecture so it can scale without introducing 
 - `src/engine/eventEngine.js`: daily random event generation and effects
 - `src/engine/economyEngine.js`: pricing demand curve and inventory sale helpers
 - `src/ui/gameUI.js`: button bindings and panel rendering
+- `src/ui/pixelRenderer.js`: state-driven canvas renderer for pixel tavern visuals
 - `scripts/regression/runScenarios.mjs`: deterministic scenario regression runner
 
 ## Layer Boundaries
