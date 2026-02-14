@@ -12,7 +12,7 @@
     <header class="topbar panel">
       <div class="brand">
         <h1>TAVERN SIM</h1>
-        <p>Guild Quarter Ledger</p>
+        <p>Kingdom Of Calvador Ledger</p>
       </div>
       <div class="top-stats" id="topStats"></div>
     </header>
@@ -20,6 +20,38 @@
     <section class="grid">
       <aside class="panel col left">
         <h2>Operations</h2>
+        <div class="group">
+          <h3>Campaign Setup</h3>
+          <label for="startLocationSelect" class="field-label">Opening Location</label>
+          <select id="startLocationSelect"></select>
+          <label for="startSeedInput" class="field-label">Seed (optional)</label>
+          <input id="startSeedInput" type="text" inputmode="numeric" placeholder="Random if blank">
+          <button id="startCampaignBtn">Start New Campaign</button>
+        </div>
+
+        <div class="group">
+          <h3>District Travel</h3>
+          <div id="districtStatusView" class="report-list compact"></div>
+          <label for="travelDestinationSelect" class="field-label">Travel Destination</label>
+          <select id="travelDestinationSelect"></select>
+          <button id="travelBtn">Begin District Travel</button>
+        </div>
+
+        <div class="group">
+          <h3>Crown Compliance</h3>
+          <div id="crownStatusView" class="report-list compact"></div>
+          <button id="fileComplianceBtn">File Voluntary Report</button>
+          <button id="settleArrearsBtn">Settle Crown Arrears</button>
+        </div>
+
+        <div class="group">
+          <h3>Supplier Network</h3>
+          <div id="supplierStatusView" class="report-list compact"></div>
+          <button id="signLocalContractBtn">Sign Local Broker Contract</button>
+          <button id="signWholesaleContractBtn">Sign Arcanum Wholesale Contract</button>
+          <button id="stockRunBtn">Dispatch City Stock-Up Run</button>
+        </div>
+
         <div class="group">
           <h3>Production</h3>
           <button id="brewAleBtn">Brew Ale</button>
@@ -96,6 +128,11 @@
           <button id="rotaBalancedBtn">Balanced Rota</button>
           <button id="rotaDayBtn">Day Heavy Rota</button>
           <button id="rotaNightBtn">Night Heavy Rota</button>
+        </div>
+
+        <div class="group">
+          <h3>World Influence</h3>
+          <div id="worldActorsView" class="kv-list"></div>
         </div>
       </aside>
     </section>

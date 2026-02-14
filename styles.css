@@ -194,6 +194,30 @@ h3 {
   gap: 0.5rem;
 }
 
+.field-label {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+select,
+input[type="text"] {
+  width: 100%;
+  margin-bottom: 0.45rem;
+  border: 1px solid rgba(152, 101, 59, 0.94);
+  background: linear-gradient(180deg, #6f4428, #58351f 58%, #492c1b 100%);
+  color: #f2dfbd;
+  padding: 0.4rem 0.45rem;
+  font-family: inherit;
+  font-size: 0.8rem;
+  box-shadow: inset 0 0 0 1px rgba(34, 18, 11, 0.72);
+}
+
+select:disabled {
+  opacity: 0.65;
+}
+
 button {
   width: 100%;
   margin-bottom: 0.42rem;
@@ -290,6 +314,11 @@ button.primary {
   margin-bottom: 0.75rem;
   min-height: 140px;
   box-shadow: inset 0 0 0 1px rgba(21, 11, 8, 0.76);
+}
+
+.report-list.compact {
+  min-height: 110px;
+  margin-bottom: 0.5rem;
 }
 
 .kv-row,

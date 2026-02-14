@@ -5,6 +5,21 @@ import {
   saveGame,
   subscribeOnChange,
   startNewGame,
+  listStartingLocations,
+  listDistricts,
+  listWorldActors,
+  getCrownAuthorityStatus,
+  getSupplierNetworkStatus,
+  getRivalStatus,
+  getWorldReputationStatus,
+  getWorldLayerStatus,
+  fileComplianceReport,
+  settleCrownArrears,
+  signLocalBrokerContract,
+  signArcanumWholesaleContract,
+  scheduleCityStockRun,
+  listTravelOptions,
+  startDistrictTravel,
   listScenarios,
   loadScenario
 } from "../engine/gameEngine.js";
@@ -44,8 +59,23 @@ export function startApp() {
       return loadGame(saved);
     },
     clearSave: () => persistence.clear(),
-    newGame: (seed = null) => {
-      const result = startNewGame(seed);
+    locations: () => listStartingLocations(),
+    districts: () => listDistricts(),
+    actors: () => listWorldActors(),
+    crown: () => getCrownAuthorityStatus(),
+    suppliers: () => getSupplierNetworkStatus(),
+    rivals: () => getRivalStatus(),
+    worldReputation: () => getWorldReputationStatus(),
+    worldLayer: () => getWorldLayerStatus(),
+    fileCompliance: () => fileComplianceReport(),
+    settleArrears: (amount = null) => settleCrownArrears(amount),
+    signLocalContract: () => signLocalBrokerContract(),
+    signWholesaleContract: () => signArcanumWholesaleContract(),
+    runCityStockTrip: (bundleScale = 1) => scheduleCityStockRun(bundleScale),
+    travelOptions: () => listTravelOptions(),
+    travel: (destinationId) => startDistrictTravel(destinationId),
+    newGame: (seed = null, startingLocation = null) => {
+      const result = startNewGame(seed, startingLocation);
       if (result.ok) {
         saveCurrentState();
       }
