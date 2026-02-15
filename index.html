@@ -8,7 +8,75 @@
 </head>
 <body>
   <div class="scanline"></div>
-  <main class="app-shell">
+  <div id="bootWarning" class="boot-warning hidden" role="alert"></div>
+  <div id="menuRoot" class="menu-root" aria-live="polite">
+    <section class="menu-panel" data-menu-screen="main_menu" aria-label="Main Menu">
+      <div class="menu-logo-wrap">
+        <div class="menu-logo-plaque">
+          <p class="menu-logo-kicker">Kingdom Of Calvador</p>
+          <h1 class="menu-logo-title">Tavern Simulator</h1>
+          <p class="menu-logo-subtitle">Warm Hearths, Sharp Ledgers</p>
+        </div>
+      </div>
+      <div class="menu-actions">
+        <button id="menuPlayBtn" class="menu-btn primary">Play</button>
+        <button id="menuSettingsBtn" class="menu-btn">Settings</button>
+        <button id="menuContinueBtn" class="menu-btn">Continue</button>
+        <p id="menuContinueMeta" class="menu-note"></p>
+      </div>
+    </section>
+
+    <section class="menu-panel hidden" data-menu-screen="new_campaign_location_select" aria-label="Location Select">
+      <h2 class="menu-heading">Choose Your Opening Location</h2>
+      <p class="menu-note">Select where your tavern begins in the Kingdom of Calvador.</p>
+      <div id="menuLocationCards" class="location-card-grid"></div>
+      <label for="menuSeedInput" class="field-label">Seed (optional)</label>
+      <input id="menuSeedInput" type="text" inputmode="numeric" placeholder="Random if blank">
+      <div class="menu-actions inline">
+        <button id="menuStartCampaignBtn" class="menu-btn primary">Start Campaign</button>
+        <button id="menuBackFromLocationBtn" class="menu-btn">Back</button>
+      </div>
+    </section>
+
+    <section class="menu-panel hidden" data-menu-screen="settings_menu" aria-label="Settings">
+      <h2 class="menu-heading">Settings</h2>
+      <p class="menu-note">Foundational settings for menu and UI presentation.</p>
+
+      <label for="menuAudioModeSelect" class="field-label">Audio Mode</label>
+      <select id="menuAudioModeSelect">
+        <option value="hearth_only">Hearth Ambience (Placeholder)</option>
+        <option value="muted">Muted</option>
+      </select>
+
+      <label for="menuUiScaleSelect" class="field-label">UI Scale</label>
+      <select id="menuUiScaleSelect">
+        <option value="0.9">Compact</option>
+        <option value="1">Default</option>
+        <option value="1.1">Large</option>
+      </select>
+
+      <label for="menuTextSizeSelect" class="field-label">Text Size</label>
+      <select id="menuTextSizeSelect">
+        <option value="compact">Compact</option>
+        <option value="default">Default</option>
+        <option value="large">Large</option>
+      </select>
+
+      <label for="menuDefaultSpeedSelect" class="field-label">Default Simulation Speed</label>
+      <select id="menuDefaultSpeedSelect">
+        <option value="0">Pause</option>
+        <option value="1">Play</option>
+        <option value="2">Fast x2</option>
+        <option value="4">Fast x4</option>
+      </select>
+
+      <div class="menu-actions inline">
+        <button id="menuBackFromSettingsBtn" class="menu-btn">Back</button>
+      </div>
+    </section>
+  </div>
+
+  <main class="app-shell" id="appShell">
     <header class="topbar panel">
       <div class="brand">
         <h1>TAVERN SIM</h1>
@@ -158,6 +226,16 @@
           </div>
         </div>
 
+        <div class="group">
+          <h3>Command Board</h3>
+          <div id="commandBoardView" class="report-list compact"></div>
+        </div>
+
+        <div class="group">
+          <h3>Delegation Desk</h3>
+          <div id="delegationView" class="report-list compact"></div>
+        </div>
+
         <div class="group inline">
           <button id="trainBtn">Train Staff</button>
           <button id="marketingBtn">Run Marketing</button>
@@ -194,9 +272,47 @@
           <h3>World Influence</h3>
           <div id="worldActorsView" class="kv-list"></div>
         </div>
+
+        <div class="group">
+          <h3>Analytics Dashboard</h3>
+          <div id="analyticsView" class="report-list compact"></div>
+        </div>
+
+        <div class="group">
+          <h3>Scouting And Rumors</h3>
+          <div id="scoutingView" class="report-list compact"></div>
+        </div>
       </aside>
     </section>
   </main>
+
+  <script>
+    (function () {
+      const warningEl = document.getElementById("bootWarning");
+      if (!warningEl) {
+        return;
+      }
+
+      function showWarning(message) {
+        warningEl.textContent = message;
+        warningEl.classList.remove("hidden");
+      }
+
+      if (window.location.protocol === "file:") {
+        showWarning(
+          "Local file mode detected. Run a local server (for example: python -m http.server 4173) and open http://127.0.0.1:4173/index.html."
+        );
+      }
+
+      window.setTimeout(() => {
+        if (!window.__tavernAppStarted) {
+          showWarning(
+            "Game scripts did not finish booting. Serve the project over http://localhost (not file://)."
+          );
+        }
+      }, 1400);
+    })();
+  </script>
 
   <script type="module" src="src/main.js"></script>
 </body>

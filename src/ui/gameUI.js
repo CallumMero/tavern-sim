@@ -15,14 +15,22 @@ import {
   startDistrictTravel,
   startNewGame,
   getManagerPhaseStatus,
+  getManagerToolingStatus,
   getSimulationClockStatus,
   getTimeflowContractStatus,
   setSimulationSpeed,
   advanceSimulationMinutes,
   updateWeeklyPlanDraft,
+  setCommandBoardSection,
+  setCommandBoardFilters,
+  markCommandMessageRead,
+  markAllCommandMessagesRead,
+  setDelegationRoleEnabled,
+  setDelegationTaskEnabled,
   commitWeeklyPlan,
   shortlistRecruitCandidate,
   scoutRecruitCandidate,
+  runScoutingSweep,
   signRecruitCandidate,
   setOnChange,
   formatCoin,
@@ -49,8 +57,45 @@ function byId(id, documentRef) {
   return documentRef.getElementById(id);
 }
 
-export function createGameUI(documentRef = document) {
+export function createGameUI(documentRef = document, options = {}) {
+  const uiOptions = {
+    onStartCampaign:
+      typeof options.onStartCampaign === "function" ? options.onStartCampaign : null,
+    onContinueCampaign:
+      typeof options.onContinueCampaign === "function" ? options.onContinueCampaign : null,
+    onSettingsChange:
+      typeof options.onSettingsChange === "function" ? options.onSettingsChange : null,
+    initialSettings: normalizeMenuSettings(options.initialSettings),
+    hasContinue: Boolean(options.hasContinue),
+    continueLabel:
+      typeof options.continueLabel === "string" && options.continueLabel.length > 0
+        ? options.continueLabel
+        : "No saved campaign found."
+  };
+  const menuState = {
+    view: "main_menu",
+    transitioning: false,
+    selectedLocation: "arcanum",
+    hasContinue: uiOptions.hasContinue,
+    continueLabel: uiOptions.continueLabel,
+    settings: { ...uiOptions.initialSettings }
+  };
   const el = {
+    appShell: byId("appShell", documentRef),
+    menuRoot: byId("menuRoot", documentRef),
+    menuPlayBtn: byId("menuPlayBtn", documentRef),
+    menuSettingsBtn: byId("menuSettingsBtn", documentRef),
+    menuContinueBtn: byId("menuContinueBtn", documentRef),
+    menuContinueMeta: byId("menuContinueMeta", documentRef),
+    menuLocationCards: byId("menuLocationCards", documentRef),
+    menuSeedInput: byId("menuSeedInput", documentRef),
+    menuStartCampaignBtn: byId("menuStartCampaignBtn", documentRef),
+    menuBackFromLocationBtn: byId("menuBackFromLocationBtn", documentRef),
+    menuAudioModeSelect: byId("menuAudioModeSelect", documentRef),
+    menuUiScaleSelect: byId("menuUiScaleSelect", documentRef),
+    menuTextSizeSelect: byId("menuTextSizeSelect", documentRef),
+    menuDefaultSpeedSelect: byId("menuDefaultSpeedSelect", documentRef),
+    menuBackFromSettingsBtn: byId("menuBackFromSettingsBtn", documentRef),
     sceneCanvas: byId("sceneCanvas", documentRef),
     startLocationSelect: byId("startLocationSelect", documentRef),
     startSeedInput: byId("startSeedInput", documentRef),
@@ -74,6 +119,10 @@ export function createGameUI(documentRef = document) {
     updatePlanDraftBtn: byId("updatePlanDraftBtn", documentRef),
     commitPlanBtn: byId("commitPlanBtn", documentRef),
     planningStatusView: byId("planningStatusView", documentRef),
+    commandBoardView: byId("commandBoardView", documentRef),
+    delegationView: byId("delegationView", documentRef),
+    analyticsView: byId("analyticsView", documentRef),
+    scoutingView: byId("scoutingView", documentRef),
     planStaffingSelect: byId("planStaffingSelect", documentRef),
     planPricingSelect: byId("planPricingSelect", documentRef),
     planProcurementSelect: byId("planProcurementSelect", documentRef),
@@ -94,6 +143,9 @@ export function createGameUI(documentRef = document) {
     window.clearInterval(simulationTickerHandle);
   }
   simulationTickerHandle = window.setInterval(() => {
+    if (menuState.view !== "in_game") {
+      return;
+    }
     const clock = getSimulationClockStatus();
     if (clock.speed > 0) {
       const tick = advanceSimulationMinutes(clock.speed);
@@ -105,20 +157,51 @@ export function createGameUI(documentRef = document) {
     renderSimulationClock(el);
   }, 1000);
 
-  bindActions(documentRef, el);
+  bindActions(documentRef, el, uiOptions, menuState);
+  bindMenuActions(documentRef, el, uiOptions, menuState);
+  renderMenuLocationCards(el, menuState);
+  applyMenuSettings(menuState.settings);
+  syncMenuSettingsInputs(el, menuState.settings);
+  syncMenuContinueState(el, menuState);
   setOnChange(() => {
     render(el);
     pixelRenderer.render(state);
+    if (menuState.view !== "in_game") {
+      syncMenuContinueState(el, menuState);
+    }
   });
   render(el);
   pixelRenderer.render(state);
   pixelRenderer.start();
+  setMenuView(el, menuState, "main_menu", { immediate: true });
 
   return {
     render: () => {
       render(el);
       pixelRenderer.render(state);
     },
+    enterGame: () => {
+      setMenuView(el, menuState, "in_game");
+    },
+    showMenu: (view = "main_menu") => {
+      setMenuView(el, menuState, view);
+    },
+    setContinueState: (hasContinue, continueLabel = "") => {
+      menuState.hasContinue = Boolean(hasContinue);
+      menuState.continueLabel =
+        typeof continueLabel === "string" && continueLabel.length > 0
+          ? continueLabel
+          : menuState.hasContinue
+            ? "Saved campaign available."
+            : "No saved campaign found.";
+      syncMenuContinueState(el, menuState);
+    },
+    applySettings: (settings) => {
+      menuState.settings = normalizeMenuSettings(settings);
+      applyMenuSettings(menuState.settings);
+      syncMenuSettingsInputs(el, menuState.settings);
+    },
+    getSettings: () => ({ ...menuState.settings }),
     destroy: () => {
       if (simulationTickerHandle) {
         window.clearInterval(simulationTickerHandle);
@@ -129,18 +212,23 @@ export function createGameUI(documentRef = document) {
   };
 }
 
-function bindActions(documentRef, el) {
+function bindActions(documentRef, el, uiOptions, menuState) {
   populateLocationOptions(el.startLocationSelect);
   populateTravelOptions(el.travelDestinationSelect);
   byId("startCampaignBtn", documentRef).addEventListener("click", () => {
     const seedRaw = el.startSeedInput.value.trim();
     const seed = seedRaw === "" ? null : seedRaw;
     const location = el.startLocationSelect.value;
-    const result = startNewGame(seed, location);
+    const result = uiOptions.onStartCampaign
+      ? uiOptions.onStartCampaign({ seed, startingLocation: location, source: "in_game_panel" })
+      : startNewGame(seed, location);
     if (!result.ok) {
       window.alert(result.error);
       return;
     }
+    menuState.hasContinue = true;
+    menuState.continueLabel = buildContinueLabel();
+    syncMenuContinueState(el, menuState);
     el.startLocationSelect.value = result.startingLocation;
   });
   byId("travelBtn", documentRef).addEventListener("click", () => {
@@ -325,6 +413,387 @@ function bindActions(documentRef, el) {
       }
     }
   });
+
+  if (el.commandBoardView) {
+    el.commandBoardView.addEventListener("click", (event) => {
+      const sectionBtn = event.target.closest("button[data-command-section]");
+      if (sectionBtn) {
+        setCommandBoardSection(sectionBtn.getAttribute("data-command-section"));
+        return;
+      }
+      const categoryBtn = event.target.closest("button[data-command-category]");
+      if (categoryBtn) {
+        setCommandBoardFilters({ category: categoryBtn.getAttribute("data-command-category") || "all" });
+        return;
+      }
+      const urgencyBtn = event.target.closest("button[data-command-urgency]");
+      if (urgencyBtn) {
+        setCommandBoardFilters({ urgency: urgencyBtn.getAttribute("data-command-urgency") || "all" });
+        return;
+      }
+      const readBtn = event.target.closest("button[data-command-read]");
+      if (readBtn) {
+        markCommandMessageRead(readBtn.getAttribute("data-command-read"));
+        return;
+      }
+      const readAllBtn = event.target.closest("button[data-command-read-all]");
+      if (readAllBtn) {
+        markAllCommandMessagesRead();
+      }
+    });
+  }
+
+  if (el.delegationView) {
+    el.delegationView.addEventListener("change", (event) => {
+      const roleToggle = event.target.closest("input[data-delegation-role]");
+      if (roleToggle) {
+        const roleId = roleToggle.getAttribute("data-delegation-role");
+        setDelegationRoleEnabled(roleId, roleToggle.checked);
+        return;
+      }
+      const taskToggle = event.target.closest("input[data-delegation-task]");
+      if (taskToggle) {
+        const roleId = taskToggle.getAttribute("data-delegation-role");
+        const taskId = taskToggle.getAttribute("data-delegation-task");
+        setDelegationTaskEnabled(roleId, taskId, taskToggle.checked);
+      }
+    });
+  }
+
+  if (el.scoutingView) {
+    el.scoutingView.addEventListener("click", (event) => {
+      const sweepBtn = event.target.closest("button[data-scouting-sweep]");
+      if (!sweepBtn) {
+        return;
+      }
+      const targetType = sweepBtn.getAttribute("data-scouting-sweep") || "event";
+      const result = runScoutingSweep(targetType);
+      if (!result.ok) {
+        window.alert(result.error);
+      }
+    });
+  }
+}
+
+function normalizeMenuSettings(settings = null) {
+  const input = settings && typeof settings === "object" ? settings : {};
+  const allowedAudio = ["hearth_only", "muted"];
+  const allowedUiScale = ["0.9", "1", "1.1"];
+  const allowedTextSize = ["compact", "default", "large"];
+  const allowedSpeed = ["0", "1", "2", "4"];
+
+  const audioMode = allowedAudio.includes(`${input.audioMode}`) ? `${input.audioMode}` : "hearth_only";
+  const uiScale = allowedUiScale.includes(`${input.uiScale}`) ? `${input.uiScale}` : "1";
+  const textSize = allowedTextSize.includes(`${input.textSize}`) ? `${input.textSize}` : "default";
+  const defaultSpeed = allowedSpeed.includes(`${input.defaultSpeed}`) ? `${input.defaultSpeed}` : "0";
+
+  return {
+    audioMode,
+    uiScale,
+    textSize,
+    defaultSpeed
+  };
+}
+
+function syncMenuSettingsInputs(el, settings) {
+  if (el.menuAudioModeSelect) {
+    el.menuAudioModeSelect.value = settings.audioMode;
+  }
+  if (el.menuUiScaleSelect) {
+    el.menuUiScaleSelect.value = settings.uiScale;
+  }
+  if (el.menuTextSizeSelect) {
+    el.menuTextSizeSelect.value = settings.textSize;
+  }
+  if (el.menuDefaultSpeedSelect) {
+    el.menuDefaultSpeedSelect.value = settings.defaultSpeed;
+  }
+}
+
+function applyMenuSettings(settings) {
+  const normalized = normalizeMenuSettings(settings);
+  const textScale = normalized.textSize === "compact" ? 0.95 : normalized.textSize === "large" ? 1.08 : 1;
+  const uiScale = Number(normalized.uiScale) || 1;
+  const mergedScale = Math.max(0.8, Math.min(1.3, uiScale * textScale));
+  document.documentElement.style.setProperty("--app-font-scale", `${mergedScale}`);
+  document.body.setAttribute("data-audio-mode", normalized.audioMode);
+}
+
+function buildContinueLabel() {
+  const manager = getManagerPhaseStatus();
+  return `Saved campaign: Day ${state.day}, Week ${manager.weekIndex}, ${manager.phase} phase.`;
+}
+
+function syncMenuContinueState(el, menuState) {
+  if (!el.menuContinueBtn || !el.menuContinueMeta) {
+    return;
+  }
+  el.menuContinueBtn.disabled = !menuState.hasContinue || menuState.transitioning;
+  el.menuContinueMeta.textContent = menuState.continueLabel;
+}
+
+function renderMenuLocationCards(el, menuState) {
+  if (!el.menuLocationCards) {
+    return;
+  }
+  const options = listStartingLocations();
+  if (!options.some((entry) => entry.id === menuState.selectedLocation)) {
+    menuState.selectedLocation = options.length > 0 ? options[0].id : "arcanum";
+  }
+
+  el.menuLocationCards.innerHTML = options
+    .map((location) => {
+      const activeClass = location.id === menuState.selectedLocation ? "active" : "";
+      return `
+        <button
+          type="button"
+          class="location-card ${activeClass}"
+          data-menu-location="${location.id}"
+          aria-pressed="${location.id === menuState.selectedLocation ? "true" : "false"}"
+        >
+          <h3>${location.label} (${location.title})</h3>
+          <p>${location.summary}</p>
+        </button>
+      `;
+    })
+    .join("");
+}
+
+function focusMenuScreen(el, menuState) {
+  if (menuState.view === "in_game") {
+    return;
+  }
+  const target = menuState.view === "settings_menu"
+    ? el.menuAudioModeSelect
+    : menuState.view === "new_campaign_location_select"
+      ? el.menuStartCampaignBtn
+      : el.menuPlayBtn;
+  if (target && typeof target.focus === "function") {
+    target.focus();
+  }
+}
+
+function lockMenuInteractivity(el, locked) {
+  const controls = [
+    el.menuPlayBtn,
+    el.menuSettingsBtn,
+    el.menuContinueBtn,
+    el.menuStartCampaignBtn,
+    el.menuBackFromLocationBtn,
+    el.menuBackFromSettingsBtn,
+    el.menuAudioModeSelect,
+    el.menuUiScaleSelect,
+    el.menuTextSizeSelect,
+    el.menuDefaultSpeedSelect,
+    el.menuSeedInput,
+    ...Array.from(document.querySelectorAll("[data-menu-location]"))
+  ];
+  controls.forEach((control) => {
+    if (control) {
+      control.disabled = Boolean(locked);
+    }
+  });
+}
+
+function setMenuView(el, menuState, nextView, options = {}) {
+  const targetView =
+    nextView === "settings_menu" || nextView === "new_campaign_location_select" || nextView === "in_game"
+      ? nextView
+      : "main_menu";
+  const immediate = Boolean(options.immediate);
+  if (menuState.transitioning && !immediate) {
+    return;
+  }
+
+  const applyView = () => {
+    menuState.view = targetView;
+    const inGame = targetView === "in_game";
+    if (el.menuRoot) {
+      el.menuRoot.classList.toggle("hidden", inGame);
+    }
+    if (el.appShell) {
+      el.appShell.classList.toggle("hidden", !inGame);
+      el.appShell.setAttribute("aria-hidden", inGame ? "false" : "true");
+    }
+    document.body.classList.toggle("menu-active", !inGame);
+    Array.from(document.querySelectorAll("[data-menu-screen]")).forEach((screen) => {
+      const screenId = screen.getAttribute("data-menu-screen");
+      screen.classList.toggle("hidden", screenId !== targetView);
+    });
+    syncMenuContinueState(el, menuState);
+    if (!inGame) {
+      focusMenuScreen(el, menuState);
+      return;
+    }
+    render(el);
+  };
+
+  if (immediate) {
+    applyView();
+    return;
+  }
+
+  menuState.transitioning = true;
+  lockMenuInteractivity(el, true);
+  if (el.menuRoot && !el.menuRoot.classList.contains("hidden")) {
+    el.menuRoot.classList.add("is-transitioning");
+  }
+
+  window.setTimeout(() => {
+    applyView();
+    if (el.menuRoot) {
+      el.menuRoot.classList.remove("is-transitioning");
+    }
+    menuState.transitioning = false;
+    lockMenuInteractivity(el, false);
+    syncMenuContinueState(el, menuState);
+  }, 180);
+}
+
+function bindMenuActions(documentRef, el, uiOptions, menuState) {
+  if (!el.menuRoot) {
+    return;
+  }
+
+  const persistSettings = () => {
+    if (uiOptions.onSettingsChange) {
+      uiOptions.onSettingsChange({ ...menuState.settings });
+    }
+  };
+
+  const applySettingsFromControls = () => {
+    menuState.settings = normalizeMenuSettings({
+      audioMode: el.menuAudioModeSelect ? el.menuAudioModeSelect.value : "hearth_only",
+      uiScale: el.menuUiScaleSelect ? el.menuUiScaleSelect.value : "1",
+      textSize: el.menuTextSizeSelect ? el.menuTextSizeSelect.value : "default",
+      defaultSpeed: el.menuDefaultSpeedSelect ? el.menuDefaultSpeedSelect.value : "0"
+    });
+    applyMenuSettings(menuState.settings);
+    syncMenuSettingsInputs(el, menuState.settings);
+    persistSettings();
+  };
+
+  if (el.menuPlayBtn) {
+    el.menuPlayBtn.addEventListener("click", () => {
+      renderMenuLocationCards(el, menuState);
+      setMenuView(el, menuState, "new_campaign_location_select");
+    });
+  }
+
+  if (el.menuSettingsBtn) {
+    el.menuSettingsBtn.addEventListener("click", () => {
+      syncMenuSettingsInputs(el, menuState.settings);
+      setMenuView(el, menuState, "settings_menu");
+    });
+  }
+
+  if (el.menuBackFromLocationBtn) {
+    el.menuBackFromLocationBtn.addEventListener("click", () => {
+      setMenuView(el, menuState, "main_menu");
+    });
+  }
+
+  if (el.menuBackFromSettingsBtn) {
+    el.menuBackFromSettingsBtn.addEventListener("click", () => {
+      setMenuView(el, menuState, "main_menu");
+    });
+  }
+
+  if (el.menuLocationCards) {
+    el.menuLocationCards.addEventListener("click", (event) => {
+      const btn = event.target.closest("button[data-menu-location]");
+      if (!btn) {
+        return;
+      }
+      const selected = btn.getAttribute("data-menu-location");
+      if (!selected) {
+        return;
+      }
+      menuState.selectedLocation = selected;
+      renderMenuLocationCards(el, menuState);
+    });
+  }
+
+  if (el.menuStartCampaignBtn) {
+    el.menuStartCampaignBtn.addEventListener("click", () => {
+      const seedRaw = el.menuSeedInput ? el.menuSeedInput.value.trim() : "";
+      const seed = seedRaw.length > 0 ? seedRaw : null;
+      const selectedLocation = menuState.selectedLocation || "arcanum";
+      if (menuState.hasContinue) {
+        const confirmed = window.confirm(
+          "Starting a new campaign will overwrite your current save. Continue?"
+        );
+        if (!confirmed) {
+          return;
+        }
+      }
+      const result = uiOptions.onStartCampaign
+        ? uiOptions.onStartCampaign({
+            seed,
+            startingLocation: selectedLocation,
+            source: "menu_play"
+          })
+        : startNewGame(seed, selectedLocation);
+      if (!result.ok) {
+        window.alert(result.error || "Unable to start campaign.");
+        return;
+      }
+      menuState.hasContinue = true;
+      menuState.continueLabel = buildContinueLabel();
+      syncMenuContinueState(el, menuState);
+      setMenuView(el, menuState, "in_game");
+      setSimulationSpeed(Number(menuState.settings.defaultSpeed) || 0);
+    });
+  }
+
+  if (el.menuContinueBtn) {
+    el.menuContinueBtn.addEventListener("click", () => {
+      if (!menuState.hasContinue) {
+        return;
+      }
+      const result = uiOptions.onContinueCampaign ? uiOptions.onContinueCampaign() : { ok: false, error: "Continue not available." };
+      if (!result.ok) {
+        window.alert(result.error || "Unable to continue campaign.");
+        return;
+      }
+      menuState.hasContinue = true;
+      menuState.continueLabel = buildContinueLabel();
+      syncMenuContinueState(el, menuState);
+      setMenuView(el, menuState, "in_game");
+    });
+  }
+
+  [
+    el.menuAudioModeSelect,
+    el.menuUiScaleSelect,
+    el.menuTextSizeSelect,
+    el.menuDefaultSpeedSelect
+  ].forEach((control) => {
+    if (control) {
+      control.addEventListener("change", applySettingsFromControls);
+    }
+  });
+
+  if (el.menuSeedInput) {
+    el.menuSeedInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && el.menuStartCampaignBtn) {
+        event.preventDefault();
+        el.menuStartCampaignBtn.click();
+      }
+    });
+  }
+
+  documentRef.addEventListener("keydown", (event) => {
+    if (menuState.view === "in_game") {
+      return;
+    }
+    if (event.key === "Escape") {
+      if (menuState.view === "settings_menu" || menuState.view === "new_campaign_location_select") {
+        event.preventDefault();
+        setMenuView(el, menuState, "main_menu");
+      }
+    }
+  });
 }
 
 function render(el) {
@@ -336,8 +805,12 @@ function render(el) {
   renderCrownStatus(el);
   renderSupplierStatus(el);
   renderPlanningStatus(el);
+  renderCommandBoard(el);
+  renderDelegationDesk(el);
   syncPlanningControls(el);
   renderWorldActors(el);
+  renderAnalyticsDashboard(el);
+  renderScoutingDesk(el);
   renderTopStats(el);
   renderInventory(el);
   renderPrices(el);
@@ -350,7 +823,10 @@ function syncTimeflowInteractionLocks(el) {
   const timeflow = getTimeflowContractStatus();
   const disabled = Boolean(timeflow.runtime && timeflow.runtime.inProgress);
   const dynamicActionButtons = Array.from(document.querySelectorAll(
-    "#priceView button, #staffView button"
+    "#priceView button, #staffView button, #commandBoardView button, #scoutingView button"
+  ));
+  const dynamicInputs = Array.from(document.querySelectorAll(
+    "#delegationView input"
   ));
   [
     document.getElementById("startCampaignBtn"),
@@ -385,7 +861,8 @@ function syncTimeflowInteractionLocks(el) {
     el.stockRunBtn,
     el.updatePlanDraftBtn,
     el.commitPlanBtn,
-    ...dynamicActionButtons
+    ...dynamicActionButtons,
+    ...dynamicInputs
   ].forEach((control) => {
     if (control) {
       control.disabled = disabled;
@@ -709,6 +1186,10 @@ function renderReport(el) {
     },
     {
       tone: "neutral",
+      text: `Manager tooling: ${state.lastReport.managerToolingSummary || "Manager tooling summary unavailable."}`
+    },
+    {
+      tone: "neutral",
       text:
         `Seasonal status: ${state.lastReport.seasonSummary || "Season summary unavailable."} ` +
         `${manager.timeline ? `Transition note: ${manager.timeline.lastTransitionNote}` : ""}`
@@ -975,5 +1456,145 @@ function renderPlanningStatus(el) {
     `<div class="report-line neutral">Transition note: ${manager.transitionReason || "-"}</div>`,
     `<div class="report-line ${manager.guardNote ? "bad" : "neutral"}">${manager.guardNote || manager.lastWeekSummary}</div>`,
     `<div class="report-line neutral">Guard recoveries: ${manager.timeflowGuardRecoveries || 0}</div>`
+  ].join("");
+}
+
+function renderCommandBoard(el) {
+  if (!el.commandBoardView) {
+    return;
+  }
+  const tooling = getManagerToolingStatus();
+  const board = tooling.commandBoard || {};
+  const messages = Array.isArray(board.messages) ? board.messages : [];
+  const categoryFilter = board.categoryFilter || "all";
+  const urgencyFilter = board.urgencyFilter || "all";
+  const filtered = messages.filter((entry) => {
+    const categoryOk = categoryFilter === "all" || entry.category === categoryFilter;
+    const urgencyOk = urgencyFilter === "all" || entry.urgency === urgencyFilter;
+    return categoryOk && urgencyOk;
+  });
+  const top = filtered.slice(0, 6);
+  const sections = Array.isArray(tooling.sections) ? tooling.sections : [];
+  const activeSection = tooling.activeSection || "message_board";
+  const categories = ["all", "compliance", "supply", "staffing", "rivalry", "finance", "events", "scouting", "objectives", "analytics", "operations"];
+  const urgencies = ["all", "critical", "high", "medium", "low"];
+  el.commandBoardView.innerHTML = [
+    `<div class="report-line neutral">Unread ${board.unreadCount || 0} | ${board.lastSummary || "No command messages."}</div>`,
+    `<div class="group inline">${sections
+      .map((sectionId) => {
+        const label = sectionId.replace("_", " ");
+        const activeClass = sectionId === activeSection ? "active-speed" : "";
+        return `<button class="${activeClass}" data-command-section="${sectionId}">${label}</button>`;
+      })
+      .join("")}</div>`,
+    `<div class="group inline">Category ${categories
+      .map((categoryId) => {
+        const activeClass = categoryId === categoryFilter ? "active-speed" : "";
+        return `<button class="${activeClass}" data-command-category="${categoryId}">${categoryId}</button>`;
+      })
+      .join("")}</div>`,
+    `<div class="group inline">Urgency ${urgencies
+      .map((urgencyId) => {
+        const activeClass = urgencyId === urgencyFilter ? "active-speed" : "";
+        return `<button class="${activeClass}" data-command-urgency="${urgencyId}">${urgencyId}</button>`;
+      })
+      .join("")}</div>`,
+    `<div class="group inline"><button data-command-read-all="1">Mark All Read</button></div>`,
+    ...top.map((entry) => {
+      const tone =
+        entry.urgency === "critical" ? "bad" : entry.urgency === "high" ? "bad" : entry.urgency === "medium" ? "neutral" : "good";
+      const recommendation = entry.recommendation
+        ? ` Rec: ${entry.recommendation.label} (conf ${entry.recommendation.confidence} / impact ${entry.recommendation.impact}).`
+        : "";
+      return `<div class="report-line ${tone}">[${entry.urgency.toUpperCase()}] ${entry.title}: ${entry.summary}${recommendation} <button data-command-read="${entry.id}">${entry.read ? "Read" : "Mark Read"}</button></div>`;
+    }),
+    filtered.length === 0 ? `<div class="report-line neutral">No messages match current filters.</div>` : ""
+  ].join("");
+}
+
+function renderDelegationDesk(el) {
+  if (!el.delegationView) {
+    return;
+  }
+  const tooling = getManagerToolingStatus();
+  const delegation = tooling.delegation || {};
+  const roles = delegation.roles ? Object.values(delegation.roles) : [];
+  const auditTrail = Array.isArray(delegation.auditTrail) ? delegation.auditTrail : [];
+  el.delegationView.innerHTML = [
+    `<div class="report-line neutral">${delegation.lastRunSummary || "Delegation summary unavailable."}</div>`,
+    `<div class="report-line neutral">Last run day: ${delegation.lastRunDay || 0}</div>`,
+    ...roles.map((role) => {
+      const taskRows = Object.entries(role.tasks || {})
+        .map(([taskId, enabled]) => {
+          return `<label><input type="checkbox" data-delegation-role="${role.id}" data-delegation-task="${taskId}" ${enabled ? "checked" : ""}> ${taskId}</label>`;
+        })
+        .join(" ");
+      return `
+        <div class="report-line neutral">
+          <label><input type="checkbox" data-delegation-role="${role.id}" ${role.enabled ? "checked" : ""}> ${role.label}</label>
+          <span>${taskRows}</span>
+        </div>
+      `;
+    }),
+    `<div class="report-line neutral">Recent audit:</div>`,
+    ...auditTrail.slice(0, 5).map((entry) => {
+      const tone = entry.tone === "bad" ? "bad" : entry.tone === "good" ? "good" : "neutral";
+      return `<div class="report-line ${tone}">D${entry.day} ${entry.roleId}: ${entry.result}</div>`;
+    }),
+    auditTrail.length === 0 ? `<div class="report-line neutral">No delegated actions recorded yet.</div>` : ""
+  ].join("");
+}
+
+function renderAnalyticsDashboard(el) {
+  if (!el.analyticsView) {
+    return;
+  }
+  const tooling = getManagerToolingStatus();
+  const analytics = tooling.analytics || {};
+  const summary = analytics.dailySummary || {};
+  const deltas = analytics.deltas || {};
+  const margins = analytics.menuItemMargins || {};
+  const anomalies = Array.isArray(analytics.anomalyNotes) ? analytics.anomalyNotes : [];
+  const history = Array.isArray(analytics.history) ? analytics.history : [];
+  const trendTone = (deltas.marginPct || 0) >= 0 ? "good" : "bad";
+  el.analyticsView.innerHTML = [
+    `<div class="report-line neutral">Updated day: ${analytics.lastUpdatedDay || 0}</div>`,
+    `<div class="report-line neutral">Conversion ${summary.conversionPct || 0}% (d ${deltas.conversionPct || 0})</div>`,
+    `<div class="report-line neutral">Retention ${summary.retentionPct || 0}% (d ${deltas.retentionPct || 0})</div>`,
+    `<div class="report-line ${trendTone}">Margin ${summary.marginPct || 0}% (d ${deltas.marginPct || 0})</div>`,
+    `<div class="report-line neutral">Avg Spend ${formatCoin(summary.avgSpend || 0)} (d ${formatCoin(deltas.avgSpend || 0)})</div>`,
+    `<div class="report-line neutral">Menu margin: ale ${formatCoin(margins.ale || 0)}, mead ${formatCoin(margins.mead || 0)}, stew ${formatCoin(margins.stew || 0)}, bread ${formatCoin(margins.bread || 0)}, room ${formatCoin(margins.room || 0)}.</div>`,
+    `<div class="report-line neutral">Recent history entries: ${history.length}</div>`,
+    ...anomalies.slice(0, 4).map((note) => `<div class="report-line bad">${note}</div>`),
+    anomalies.length === 0 ? `<div class="report-line good">No major anomalies flagged.</div>` : ""
+  ].join("");
+}
+
+function renderScoutingDesk(el) {
+  if (!el.scoutingView) {
+    return;
+  }
+  const tooling = getManagerToolingStatus();
+  const scouting = tooling.scouting || {};
+  const reports = Array.isArray(scouting.reports) ? scouting.reports : [];
+  const rumors = Array.isArray(scouting.rumors) ? scouting.rumors : [];
+  const activeRumors = rumors.filter((entry) => entry.status === "active");
+  el.scoutingView.innerHTML = [
+    `<div class="report-line neutral">${scouting.lastSummary || "Scouting summary unavailable."}</div>`,
+    `<div class="report-line neutral">Scout quality ${scouting.scoutQuality || 0} | reports ${reports.length} | active rumors ${activeRumors.length}</div>`,
+    `<div class="group inline">
+      <button data-scouting-sweep="event">Scout Event</button>
+      <button data-scouting-sweep="rival">Scout Rival</button>
+      <button data-scouting-sweep="recruit">Scout Recruit</button>
+    </div>`,
+    ...reports.slice(0, 4).map((report) => {
+      return `<div class="report-line neutral">Intel ${report.label}: conf ${report.confidence}, fresh ${report.freshness}. ${report.summary}</div>`;
+    }),
+    ...rumors.slice(0, 4).map((rumor) => {
+      const tone = rumor.status === "resolved" ? "good" : rumor.status === "expired" ? "bad" : "neutral";
+      const resolveLine = rumor.status === "active" ? `resolves D${rumor.resolveDay}` : rumor.resolutionNote;
+      return `<div class="report-line ${tone}">Rumor (${rumor.status}/${rumor.truthState}): ${rumor.summary} ${resolveLine}</div>`;
+    }),
+    reports.length === 0 ? `<div class="report-line neutral">No intel reports yet.</div>` : ""
   ].join("");
 }

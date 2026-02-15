@@ -577,7 +577,7 @@ function drawCameoCharacters(ctx, state, time, spriteLibrary) {
     seed: cameoSeed,
     palette: resolveCharacterPalette(cameoSeed, COHORT_PALETTES.adventurers),
     mood: 70,
-    spriteFrame,
+    spriteFrame: cameoFrame,
     scale: 1.1
   });
 }

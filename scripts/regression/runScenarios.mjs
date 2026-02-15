@@ -4,6 +4,9 @@ import {
   advanceDay,
   advanceSimulationMinutes,
   commitWeeklyPlan,
+  getManagerToolingStatus,
+  markAllCommandMessagesRead,
+  runScoutingSweep,
   loadGame,
   getManagerLayerStatus,
   getManagerPhaseStatus,
@@ -13,6 +16,7 @@ import {
   loadScenario,
   runMarketing,
   saveGame,
+  setDelegationRoleEnabled,
   signLocalBrokerContract,
   state,
   setTimeflowParityStatus,
@@ -152,6 +156,9 @@ function collectStateErrors(state) {
     }
     if (typeof state.lastReport.reputationSummary !== "string") {
       errors.push("lastReport.reputationSummary missing");
+    }
+    if (typeof state.lastReport.managerToolingSummary !== "string") {
+      errors.push("lastReport.managerToolingSummary missing");
     }
     const reputationFields = [
       ["topCohortStandingScore", state.lastReport.topCohortStandingScore],
@@ -536,6 +543,46 @@ function collectManagerErrors(state) {
       errors.push(`manager timeline weekOfSeason invalid: ${manager.timeline.weekOfSeason}`);
     }
   }
+  if (!manager.commandBoard || typeof manager.commandBoard !== "object") {
+    errors.push("manager commandBoard missing");
+  } else {
+    if (!Array.isArray(manager.commandBoard.messages)) {
+      errors.push("manager commandBoard.messages missing");
+    }
+    if (!isInteger(manager.commandBoard.unreadCount) || manager.commandBoard.unreadCount < 0) {
+      errors.push(`manager commandBoard.unreadCount invalid: ${manager.commandBoard.unreadCount}`);
+    }
+  }
+  if (!manager.delegation || typeof manager.delegation !== "object") {
+    errors.push("manager delegation missing");
+  } else {
+    if (!manager.delegation.roles || typeof manager.delegation.roles !== "object") {
+      errors.push("manager delegation.roles missing");
+    }
+    if (!Array.isArray(manager.delegation.auditTrail)) {
+      errors.push("manager delegation.auditTrail missing");
+    }
+  }
+  if (!manager.analytics || typeof manager.analytics !== "object") {
+    errors.push("manager analytics missing");
+  } else {
+    if (!Array.isArray(manager.analytics.history)) {
+      errors.push("manager analytics.history missing");
+    }
+    if (!manager.analytics.menuItemMargins || typeof manager.analytics.menuItemMargins !== "object") {
+      errors.push("manager analytics.menuItemMargins missing");
+    }
+  }
+  if (!manager.scouting || typeof manager.scouting !== "object") {
+    errors.push("manager scouting missing");
+  } else {
+    if (!Array.isArray(manager.scouting.reports)) {
+      errors.push("manager scouting.reports missing");
+    }
+    if (!Array.isArray(manager.scouting.rumors)) {
+      errors.push("manager scouting.rumors missing");
+    }
+  }
   return errors;
 }
 
@@ -573,6 +620,26 @@ function collectManagerLayerErrors(payload) {
   }
   if (!handoff.seasonalTimeline || typeof handoff.seasonalTimeline !== "object") {
     errors.push("manager layer seasonalTimeline missing");
+  }
+  if (!handoff.managerialTooling || typeof handoff.managerialTooling !== "object") {
+    errors.push("manager layer managerialTooling missing");
+  } else {
+    const tooling = handoff.managerialTooling;
+    if (!isInteger(tooling.contractVersion) || tooling.contractVersion < 1) {
+      errors.push(`manager layer tooling contractVersion invalid: ${tooling.contractVersion}`);
+    }
+    if (!tooling.commandBoard || typeof tooling.commandBoard !== "object") {
+      errors.push("manager layer tooling commandBoard missing");
+    }
+    if (!tooling.delegatedOutcomes || typeof tooling.delegatedOutcomes !== "object") {
+      errors.push("manager layer tooling delegatedOutcomes missing");
+    }
+    if (!tooling.analytics || typeof tooling.analytics !== "object") {
+      errors.push("manager layer tooling analytics missing");
+    }
+    if (!tooling.intelTimeline || typeof tooling.intelTimeline !== "object") {
+      errors.push("manager layer tooling intelTimeline missing");
+    }
   }
   return errors;
 }
@@ -612,6 +679,38 @@ function assertNoLegacyGuildTerms() {
   }
   if (pixelText.includes("guild quarter")) {
     throw new Error('legacy terminology remains in pixelRenderer.js ("guild quarter")');
+  }
+}
+
+function assertMenuShellContract() {
+  const indexHtml = readRepoFile("../../index.html");
+  const startAppSource = readRepoFile("../../src/runtime/startApp.js");
+  const gameUiSource = readRepoFile("../../src/ui/gameUI.js");
+  const settingsStoreSource = readRepoFile("../../src/runtime/appSettings.js");
+
+  const requiredIndexTokens = [
+    "id=\"menuRoot\"",
+    "id=\"menuPlayBtn\"",
+    "id=\"menuSettingsBtn\"",
+    "id=\"menuContinueBtn\"",
+    "id=\"menuStartCampaignBtn\"",
+    "id=\"menuDefaultSpeedSelect\"",
+    "id=\"appShell\""
+  ];
+  requiredIndexTokens.forEach((token) => {
+    if (!indexHtml.includes(token)) {
+      throw new Error(`menu shell contract missing in index.html: ${token}`);
+    }
+  });
+
+  if (!startAppSource.includes("createAppSettingsStore")) {
+    throw new Error("menu shell contract missing settings store wiring in startApp.js");
+  }
+  if (!gameUiSource.includes("setMenuView")) {
+    throw new Error("menu shell contract missing menu routing in gameUI.js");
+  }
+  if (!settingsStoreSource.includes("DEFAULT_APP_SETTINGS")) {
+    throw new Error("menu shell contract missing app settings defaults");
   }
 }
 
@@ -706,6 +805,7 @@ function runDebugStabilizationChecks(scenario) {
   }
 
   assertNoLegacyGuildTerms();
+  assertMenuShellContract();
 }
 
 function runHybridTimeflowChecks(scenario) {
@@ -789,6 +889,64 @@ function runHybridTimeflowChecks(scenario) {
   }
 }
 
+function runManagerToolingChecks(scenario) {
+  const seed = scenario.recommendedSeed;
+  const boot = loadScenario(scenario.id, seed);
+  if (!boot.ok) {
+    throw new Error(`manager tooling boot failed: ${boot.error}`);
+  }
+  const day = advanceDay({ trigger: "manual_skip" });
+  if (!day.ok) {
+    throw new Error(`manager tooling day-close failed: ${day.error}`);
+  }
+  const tooling = getManagerToolingStatus();
+  if (!tooling || typeof tooling !== "object") {
+    throw new Error("manager tooling payload missing");
+  }
+  if (!Array.isArray(tooling.sections) || tooling.sections.length < 4) {
+    throw new Error("manager tooling sections missing");
+  }
+  if (!tooling.commandBoard || !Array.isArray(tooling.commandBoard.messages) || tooling.commandBoard.messages.length === 0) {
+    throw new Error("manager tooling command board did not generate messages");
+  }
+
+  const delegationOn = setDelegationRoleEnabled("clerk", true);
+  if (!delegationOn.ok) {
+    throw new Error(`manager tooling delegation toggle failed: ${delegationOn.error}`);
+  }
+  state.world.crown.complianceScore = 40;
+  state.gold = Math.max(state.gold, 100);
+  const dayTwo = advanceDay({ trigger: "manual_skip" });
+  if (!dayTwo.ok) {
+    throw new Error(`manager tooling delegation day failed: ${dayTwo.error}`);
+  }
+  const afterDelegation = getManagerToolingStatus();
+  if (!afterDelegation.delegation || !Array.isArray(afterDelegation.delegation.auditTrail) || afterDelegation.delegation.auditTrail.length === 0) {
+    throw new Error("manager tooling delegation audit trail did not record activity");
+  }
+
+  const sweep = runScoutingSweep("rival");
+  if (!sweep.ok) {
+    throw new Error(`manager tooling scouting sweep failed: ${sweep.error}`);
+  }
+  const preSave = saveGame();
+  const loaded = loadGame(preSave);
+  if (!loaded.ok) {
+    throw new Error(`manager tooling load failed: ${loaded.error}`);
+  }
+  const postLoadTooling = getManagerToolingStatus();
+  if (!postLoadTooling.scouting || !Array.isArray(postLoadTooling.scouting.reports) || postLoadTooling.scouting.reports.length === 0) {
+    throw new Error("manager tooling scouting reports missing after load");
+  }
+  if (!postLoadTooling.analytics || !Array.isArray(postLoadTooling.analytics.history) || postLoadTooling.analytics.history.length === 0) {
+    throw new Error("manager tooling analytics history missing after load");
+  }
+  const markAll = markAllCommandMessagesRead();
+  if (!markAll.ok) {
+    throw new Error(`manager tooling mark-all-read failed: ${markAll.error}`);
+  }
+}
+
 function runScenario(scenario) {
   const bootResult = loadScenario(scenario.id, scenario.recommendedSeed);
   if (!bootResult.ok) {
@@ -844,6 +1002,7 @@ function runScenario(scenario) {
   try {
     runHybridTimeflowChecks(scenario);
     runDebugStabilizationChecks(scenario);
+    runManagerToolingChecks(scenario);
     setTimeflowParityStatus("pass");
   } catch (error) {
     setTimeflowParityStatus("fail");

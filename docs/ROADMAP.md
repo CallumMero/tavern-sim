@@ -288,10 +288,163 @@ Milestone 3.5 exit criteria:
 
 ### Milestone 4: Football Manager Style Tooling
 
-- Inbox/message center with narrative reports and recommendations
+- Message board command center with narrative reports and recommendations
 - Staff responsibilities delegation (head chef, floor manager, clerk)
 - Analytical dashboards: conversion, retention, margin by menu item
 - Scouting and rumor systems for recruits, rivals, and events
+
+Milestone 4 implementation steps:
+
+1. Define M4 command-board data contract and navigation states:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - define canonical sections (`message_board`, `delegation`, `analytics`, `scouting`) and routing rules.
+   - formalize message payload schema (source, urgency, category, recommendation, expiry, linked actions).
+2. Implement message board generation pipeline:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - create daily/weekly message producers from world, manager, finance, staffing, suppliers, rivals, and objectives.
+   - include severity ranking and queue ordering so high-risk items surface first.
+3. Build message board UI surface:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - render message list with category filters, urgency indicators, read/unread state, and expandable detail.
+   - include fast actions from message context (jump to relevant panel/command where applicable).
+4. Add recommendation engine for operator guidance:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - attach recommendations to key message types (compliance risk, supply strain, staffing fatigue, rivalry pressure).
+   - include confidence/impact hints and expected tradeoff notes.
+5. Implement delegation responsibility model:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - define responsibility matrix for head chef, floor manager, and clerk (plus player override boundaries).
+   - configure which subsystems can be delegated (procurement, rota tuning, pricing guardrails, routine filings).
+6. Implement delegated decision execution + audit trail:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - delegated agents execute bounded actions at valid timeflow windows only.
+   - every delegated action writes reason/context/result into an auditable log trail.
+7. Build analytics metric engine:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - compute conversion, retention, cohort contribution, margin by menu item, and trend deltas over time windows.
+   - include data quality guards for sparse/edge cases (low volume days, missing cohorts, startup periods).
+8. Build analytics dashboard UI:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - add manager-facing dashboard panels/cards for core KPIs, trends, and anomaly highlights.
+   - provide comparisons (today vs rolling week, week vs prior week, location/district context).
+9. Implement scouting intel model:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - support scouting targets across recruits, rivals, and world events with confidence and uncertainty.
+   - introduce intel freshness and scouting quality effects on detail depth.
+10. Implement rumor lifecycle and resolution:
+    - [x] Implementation complete
+    - [x] Validation complete
+    - rumors can be true/false/partial, decay over time, and resolve into confirmed outcomes.
+    - resolved rumors update reputation/standing narratives and downstream recommendations.
+11. Extend persistence, reporting, and regression coverage for M4:
+    - [x] Implementation complete
+    - [x] Validation complete
+    - persist message board state, delegation settings, analytics snapshots, and scouting/rumor entities.
+    - add regression checks for deterministic behavior and contract validity after save/load.
+12. Lock M4 -> post-M4 handoff contract:
+    - [x] Implementation complete
+    - [x] Validation complete
+    - expose stable outputs so later milestones consume M4 systems directly (messages, delegated outcomes, analytics, intel timelines).
+    - ensure no bridge sprint is required between M4 completion and next roadmap layer.
+
+Milestone 4 exit criteria:
+
+- [x] Message board is a usable manager command center with narrative updates, urgency ordering, and actionable recommendations.
+- [x] Delegation system runs bounded autonomous routines with transparent override controls and auditability.
+- [x] Analytics dashboards provide reliable conversion/retention/margin insights and trend context for decisions.
+- [x] Scouting and rumor systems produce uncertain but useful intel that resolves over time into tangible outcomes.
+- [x] M4 systems persist/load cleanly and remain deterministic under regression scenarios.
+- [x] M4 outputs are stable and directly consumable by the next milestone with no integration bridge work.
+
+### Milestone 5: Main Menu + Front-Door Experience
+
+- Main menu appears before entering the management UI
+- Main menu presents `Play` and `Settings` as the first actions
+- `Play` opens an opening-location selection screen (Arcanum / Meadowbrook) before campaign boot
+- Centered pixel-art logo treatment for "Tavern Simulator" with a dark wooden fantasy-medieval tavern mood
+- Clean state transitions between menu screens and in-game UI without desyncing campaign state
+
+Milestone 5 implementation steps:
+
+1. Define app shell routing/state for front-door screens:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - add explicit UI states (`main_menu`, `settings_menu`, `new_campaign_location_select`, `in_game`).
+   - ensure game systems do not auto-start rendering in-game controls while in menu states.
+2. Build base main menu layout container:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - dedicated full-screen menu layer with centered branding area and primary action buttons.
+   - menu-first boot path on initial load (and after returning from game session if desired).
+3. Implement Tavern Simulator logo treatment:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - add pixel-styled "Tavern Simulator" logo lockup centered on main menu.
+   - apply dark-wood/fantasy tavern visual language (wood grain framing, warm lantern accents, readable contrast).
+4. Implement main menu primary actions:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - `Play` routes to location-selection screen.
+   - `Settings` routes to settings screen.
+   - include `Back`/`Return` routing behavior where needed.
+5. Build opening-location selection screen:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - present Arcanum and Meadowbrook as clear selectable cards/options with concise tradeoff summaries.
+   - optional seed input shown here (or preserved cleanly from previous campaign flow).
+6. Bind campaign start flow from menu selection:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - selecting location + confirming start must call `startNewGame(...)` with chosen location.
+   - on success, transition from menu state to `in_game` and reveal existing game UI.
+7. Build settings screen (Milestone-5 scope):
+   - [x] Implementation complete
+   - [x] Validation complete
+   - include foundational settings only (audio placeholder, UI scale/text size placeholder, and simulation defaults if applicable).
+   - settings persist between sessions and safely hydrate on app start.
+8. Add menu/in-game visual transition behavior:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - smooth but lightweight transition (fade/slide) between menu and game.
+   - prevent double-trigger clicks during transitions.
+9. Ensure menu flow works with save/load expectations:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - define deterministic behavior when an existing save is present (e.g., Continue entry or Play -> New Campaign confirmation).
+   - avoid accidental save overwrite without explicit user confirmation.
+10. Add keyboard/controller-friendly navigation baseline:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - menu focus order, Enter/Space activation, Escape back behavior.
+   - basic accessibility semantics for menu controls and labels.
+11. Add regression/QA coverage for menu flow:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - tests/checks for state routing (`main_menu` -> `play` -> `location_select` -> `in_game`) and settings persistence.
+   - smoke checks that menu introduction does not break existing simulation regressions.
+12. Lock M5 -> next milestone UI handoff:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - expose stable hooks for future polish (animated backgrounds, richer settings, continue/load slots, credits).
+   - ensure no bridge sprint is required before building post-M5 UX layers.
+
+Milestone 5 exit criteria:
+
+- [x] Launching the game always opens a main menu before showing in-game management UI.
+- [x] Main menu has `Play` and `Settings` as first-level actions.
+- [x] `Play` flow always routes through location selection (Arcanum/Meadowbrook) before campaign start.
+- [x] Centered pixelated "Tavern Simulator" logo and medieval dark-wood visual direction are implemented and readable.
+- [x] Campaign starts from selected location without UI/state desync.
+- [x] Settings screen exists, persists values, and does not regress gameplay systems.
 
 ## Suggested Technical Direction
 

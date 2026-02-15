@@ -54,6 +54,21 @@ const DEFAULT_STARTING_LOCATION = "arcanum";
 const MANAGER_WEEK_LENGTH = 7;
 const MINUTES_PER_DAY = 24 * 60;
 const SIMULATION_SPEEDS = [0, 1, 2, 4];
+const MANAGER_TOOLING_CONTRACT_VERSION = 1;
+const MANAGER_TOOLING_SECTIONS = ["message_board", "delegation", "analytics", "scouting"];
+const MESSAGE_URGENCY_ORDER = ["critical", "high", "medium", "low"];
+const MAX_COMMAND_MESSAGES = 80;
+const MAX_DELEGATION_AUDIT_ENTRIES = 120;
+const MAX_ANALYTICS_HISTORY = 84;
+const MAX_SCOUTING_REPORTS = 36;
+const MAX_SCOUTING_RUMORS = 48;
+const MENU_MARGIN_COSTS = Object.freeze({
+  ale: 3,
+  mead: 5,
+  stew: 6,
+  bread: 2,
+  room: 7
+});
 const TIMEFLOW_CONTRACT_VERSION = 1;
 const TIMEFLOW_UNITS = {
   minute: "in_game_minute",
@@ -182,6 +197,152 @@ function normalizeObjectiveEntry(entry) {
       entry.payload && typeof entry.payload === "object"
         ? { ...entry.payload }
         : {}
+  };
+}
+
+function normalizeManagerMessage(entry, index = 0, dayFallback = 1) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const urgencyRaw = typeof entry.urgency === "string" ? entry.urgency : "medium";
+  const urgency = MESSAGE_URGENCY_ORDER.includes(urgencyRaw) ? urgencyRaw : "medium";
+  const confidence = Math.max(0, Math.min(100, Math.round(Number(entry.confidence) || 50)));
+  const impact = Math.max(0, Math.min(100, Math.round(Number(entry.impact) || 50)));
+  const category = typeof entry.category === "string" ? entry.category : "operations";
+  const recommendationInput =
+    entry.recommendation && typeof entry.recommendation === "object" ? entry.recommendation : {};
+  const createdDay = Math.max(1, Math.round(Number(entry.day) || dayFallback));
+  const expiresDay = Math.max(createdDay, Math.round(Number(entry.expiresDay) || createdDay + 3));
+  return {
+    id: typeof entry.id === "string" && entry.id.length > 0 ? entry.id : `msg-${createdDay}-${index}`,
+    day: createdDay,
+    source: typeof entry.source === "string" ? entry.source : "operations_desk",
+    urgency,
+    category,
+    title: typeof entry.title === "string" && entry.title.length > 0 ? entry.title : "Operations update",
+    summary: typeof entry.summary === "string" ? entry.summary : "",
+    confidence,
+    impact,
+    expiresDay,
+    linkedAction: typeof entry.linkedAction === "string" ? entry.linkedAction : "",
+    read: Boolean(entry.read),
+    recommendation: {
+      action: typeof recommendationInput.action === "string" ? recommendationInput.action : "",
+      label: typeof recommendationInput.label === "string" ? recommendationInput.label : "Review",
+      confidence: Math.max(
+        0,
+        Math.min(100, Math.round(Number(recommendationInput.confidence) || confidence))
+      ),
+      impact: Math.max(0, Math.min(100, Math.round(Number(recommendationInput.impact) || impact))),
+      tradeoff:
+        typeof recommendationInput.tradeoff === "string"
+          ? recommendationInput.tradeoff
+          : "Balanced short-term and long-term impact."
+    }
+  };
+}
+
+function normalizeDelegationRole(roleId, label, input = null, defaultTasks = {}) {
+  const source = input && typeof input === "object" ? input : {};
+  const tasksInput = source.tasks && typeof source.tasks === "object" ? source.tasks : {};
+  const tasks = Object.fromEntries(
+    Object.entries(defaultTasks).map(([taskId, defaultValue]) => [taskId, tasksInput[taskId] !== false && Boolean(defaultValue)])
+  );
+  return {
+    id: roleId,
+    label,
+    enabled: Boolean(source.enabled),
+    tasks,
+    note: typeof source.note === "string" ? source.note : ""
+  };
+}
+
+function normalizeDelegationAuditEntry(entry, index = 0, dayFallback = 1) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  return {
+    id: typeof entry.id === "string" && entry.id.length > 0 ? entry.id : `audit-${dayFallback}-${index}`,
+    day: Math.max(1, Math.round(Number(entry.day) || dayFallback)),
+    boundary: typeof entry.boundary === "string" ? entry.boundary : "day_start",
+    roleId: typeof entry.roleId === "string" ? entry.roleId : "clerk",
+    action: typeof entry.action === "string" ? entry.action : "routine",
+    result: typeof entry.result === "string" ? entry.result : "",
+    tone: typeof entry.tone === "string" ? entry.tone : "neutral"
+  };
+}
+
+function normalizeAnalyticsHistoryEntry(entry, index = 0, dayFallback = 1) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  return {
+    day: Math.max(1, Math.round(Number(entry.day) || dayFallback + index)),
+    guests: Math.max(0, Math.round(Number(entry.guests) || 0)),
+    revenue: Math.max(0, Math.round(Number(entry.revenue) || 0)),
+    net: Math.round(Number(entry.net) || 0),
+    conversionPct: Math.max(0, Math.min(100, Math.round(Number(entry.conversionPct) || 0))),
+    retentionPct: Math.max(0, Math.min(100, Math.round(Number(entry.retentionPct) || 0))),
+    avgSpend: Math.max(0, Number(entry.avgSpend) || 0),
+    marginPct: Math.max(-100, Math.min(100, Math.round(Number(entry.marginPct) || 0)))
+  };
+}
+
+function normalizeScoutingReportEntry(entry, index = 0, dayFallback = 1) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  return {
+    id: typeof entry.id === "string" && entry.id.length > 0 ? entry.id : `intel-${dayFallback}-${index}`,
+    targetType: typeof entry.targetType === "string" ? entry.targetType : "event",
+    targetId: typeof entry.targetId === "string" ? entry.targetId : "",
+    label: typeof entry.label === "string" ? entry.label : "Unknown target",
+    confidence: Math.max(0, Math.min(100, Math.round(Number(entry.confidence) || 40))),
+    freshness: Math.max(0, Math.min(100, Math.round(Number(entry.freshness) || 80))),
+    summary: typeof entry.summary === "string" ? entry.summary : "",
+    discoveredDay: Math.max(1, Math.round(Number(entry.discoveredDay) || dayFallback)),
+    lastUpdatedDay: Math.max(1, Math.round(Number(entry.lastUpdatedDay) || dayFallback))
+  };
+}
+
+function normalizeRumorEntry(entry, index = 0, dayFallback = 1) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const truthStateRaw = typeof entry.truthState === "string" ? entry.truthState : "unknown";
+  const truthState =
+    truthStateRaw === "true" || truthStateRaw === "false" || truthStateRaw === "partial"
+      ? truthStateRaw
+      : "unknown";
+  const statusRaw = typeof entry.status === "string" ? entry.status : "active";
+  const status =
+    statusRaw === "resolved" || statusRaw === "expired" || statusRaw === "active" ? statusRaw : "active";
+  const createdDay = Math.max(1, Math.round(Number(entry.createdDay) || dayFallback));
+  return {
+    id: typeof entry.id === "string" && entry.id.length > 0 ? entry.id : `rumor-${createdDay}-${index}`,
+    topic: typeof entry.topic === "string" ? entry.topic : "market-chatter",
+    targetType: typeof entry.targetType === "string" ? entry.targetType : "event",
+    targetId: typeof entry.targetId === "string" ? entry.targetId : "",
+    summary: typeof entry.summary === "string" ? entry.summary : "Rumor is circulating.",
+    truthState,
+    status,
+    confidence: Math.max(0, Math.min(100, Math.round(Number(entry.confidence) || 45))),
+    freshness: Math.max(0, Math.min(100, Math.round(Number(entry.freshness) || 75))),
+    createdDay,
+    resolveDay: Math.max(createdDay, Math.round(Number(entry.resolveDay) || createdDay + 3)),
+    resolutionNote: typeof entry.resolutionNote === "string" ? entry.resolutionNote : "",
+    effect:
+      entry.effect && typeof entry.effect === "object"
+        ? {
+            reputationDelta: Math.round(Number(entry.effect.reputationDelta) || 0),
+            actorId: typeof entry.effect.actorId === "string" ? entry.effect.actorId : "",
+            actorStandingDelta: Math.round(Number(entry.effect.actorStandingDelta) || 0)
+          }
+        : {
+            reputationDelta: 0,
+            actorId: "",
+            actorStandingDelta: 0
+          }
   };
 }
 
@@ -393,6 +554,57 @@ function normalizeManagerState(existing = null, currentDay = 1, activeLocationId
     : [];
   const resolvedTimeline = resolveSeasonTimeline(currentDay);
   const timelineInput = input.timeline && typeof input.timeline === "object" ? input.timeline : {};
+  const commandBoardInput = input.commandBoard && typeof input.commandBoard === "object" ? input.commandBoard : {};
+  const commandMessages = Array.isArray(commandBoardInput.messages)
+    ? commandBoardInput.messages
+        .map((entry, index) => normalizeManagerMessage(entry, index, Math.max(1, Math.round(Number(currentDay) || 1))))
+        .filter(Boolean)
+        .slice(0, MAX_COMMAND_MESSAGES)
+    : [];
+  const delegationInput = input.delegation && typeof input.delegation === "object" ? input.delegation : {};
+  const delegationRolesInput =
+    delegationInput.roles && typeof delegationInput.roles === "object" ? delegationInput.roles : {};
+  const delegationAudit = Array.isArray(delegationInput.auditTrail)
+    ? delegationInput.auditTrail
+        .map((entry, index) =>
+          normalizeDelegationAuditEntry(entry, index, Math.max(1, Math.round(Number(currentDay) || 1)))
+        )
+        .filter(Boolean)
+        .slice(0, MAX_DELEGATION_AUDIT_ENTRIES)
+    : [];
+  const analyticsInput = input.analytics && typeof input.analytics === "object" ? input.analytics : {};
+  const analyticsHistory = Array.isArray(analyticsInput.history)
+    ? analyticsInput.history
+        .map((entry, index) =>
+          normalizeAnalyticsHistoryEntry(entry, index, Math.max(1, Math.round(Number(currentDay) || 1)))
+        )
+        .filter(Boolean)
+        .slice(0, MAX_ANALYTICS_HISTORY)
+    : [];
+  const scoutingInput = input.scouting && typeof input.scouting === "object" ? input.scouting : {};
+  const scoutingReports = Array.isArray(scoutingInput.reports)
+    ? scoutingInput.reports
+        .map((entry, index) =>
+          normalizeScoutingReportEntry(entry, index, Math.max(1, Math.round(Number(currentDay) || 1)))
+        )
+        .filter(Boolean)
+        .slice(0, MAX_SCOUTING_REPORTS)
+    : [];
+  const scoutingRumors = Array.isArray(scoutingInput.rumors)
+    ? scoutingInput.rumors
+        .map((entry, index) => normalizeRumorEntry(entry, index, Math.max(1, Math.round(Number(currentDay) || 1))))
+        .filter(Boolean)
+        .slice(0, MAX_SCOUTING_RUMORS)
+    : [];
+  const currentSectionRaw = typeof commandBoardInput.currentSection === "string" ? commandBoardInput.currentSection : "";
+  const currentSection = MANAGER_TOOLING_SECTIONS.includes(currentSectionRaw)
+    ? currentSectionRaw
+    : "message_board";
+  const unreadCount = commandMessages.filter((entry) => !entry.read).length;
+  const dailySummaryInput =
+    analyticsInput.dailySummary && typeof analyticsInput.dailySummary === "object" ? analyticsInput.dailySummary : {};
+  const scoutingFiltersInput =
+    scoutingInput.filters && typeof scoutingInput.filters === "object" ? scoutingInput.filters : {};
 
   return {
     phase: normalizedPhase,
@@ -488,7 +700,108 @@ function normalizeManagerState(existing = null, currentDay = 1, activeLocationId
             eventRiskTag: "Planning context pending world-layer sync.",
             recommendations: {},
             summary: "Planning context pending world-layer sync."
-          }
+          },
+    commandBoard: {
+      currentSection,
+      categoryFilter:
+        typeof commandBoardInput.categoryFilter === "string" && commandBoardInput.categoryFilter.length > 0
+          ? commandBoardInput.categoryFilter
+          : "all",
+      urgencyFilter:
+        typeof commandBoardInput.urgencyFilter === "string" && commandBoardInput.urgencyFilter.length > 0
+          ? commandBoardInput.urgencyFilter
+          : "all",
+      unreadCount,
+      lastGeneratedDay: Math.max(0, Math.round(Number(commandBoardInput.lastGeneratedDay) || 0)),
+      lastSummary:
+        typeof commandBoardInput.lastSummary === "string"
+          ? commandBoardInput.lastSummary
+          : "Command board idle. No directives published yet.",
+      messages: commandMessages
+    },
+    delegation: {
+      roles: {
+        head_chef: normalizeDelegationRole(
+          "head_chef",
+          "Head Chef",
+          delegationRolesInput.head_chef,
+          { procurement: true, menuFallback: true, qualityChecks: true }
+        ),
+        floor_manager: normalizeDelegationRole(
+          "floor_manager",
+          "Floor Manager",
+          delegationRolesInput.floor_manager,
+          { rotaTuning: true, fatigueControl: true, serviceRecovery: true }
+        ),
+        clerk: normalizeDelegationRole(
+          "clerk",
+          "Clerk",
+          delegationRolesInput.clerk,
+          { complianceFilings: true, stockPaperwork: true, contractReminders: true }
+        )
+      },
+      auditTrail: delegationAudit,
+      lastRunDay: Math.max(0, Math.round(Number(delegationInput.lastRunDay) || 0)),
+      lastRunSummary:
+        typeof delegationInput.lastRunSummary === "string"
+          ? delegationInput.lastRunSummary
+          : "Delegation desk idle."
+    },
+    analytics: {
+      history: analyticsHistory,
+      dailySummary: {
+        conversionPct: Math.max(0, Math.min(100, Math.round(Number(dailySummaryInput.conversionPct) || 0))),
+        retentionPct: Math.max(0, Math.min(100, Math.round(Number(dailySummaryInput.retentionPct) || 0))),
+        marginPct: Math.max(-100, Math.min(100, Math.round(Number(dailySummaryInput.marginPct) || 0))),
+        avgSpend: Math.max(0, Number(dailySummaryInput.avgSpend) || 0),
+        guests: Math.max(0, Math.round(Number(dailySummaryInput.guests) || 0)),
+        revenue: Math.max(0, Math.round(Number(dailySummaryInput.revenue) || 0)),
+        net: Math.round(Number(dailySummaryInput.net) || 0)
+      },
+      deltas:
+        analyticsInput.deltas && typeof analyticsInput.deltas === "object"
+          ? {
+              conversionPct: Math.round(Number(analyticsInput.deltas.conversionPct) || 0),
+              retentionPct: Math.round(Number(analyticsInput.deltas.retentionPct) || 0),
+              marginPct: Math.round(Number(analyticsInput.deltas.marginPct) || 0),
+              avgSpend: Number(analyticsInput.deltas.avgSpend) || 0
+            }
+          : { conversionPct: 0, retentionPct: 0, marginPct: 0, avgSpend: 0 },
+      menuItemMargins:
+        analyticsInput.menuItemMargins && typeof analyticsInput.menuItemMargins === "object"
+          ? {
+              ale: Math.round(Number(analyticsInput.menuItemMargins.ale) || 0),
+              mead: Math.round(Number(analyticsInput.menuItemMargins.mead) || 0),
+              stew: Math.round(Number(analyticsInput.menuItemMargins.stew) || 0),
+              bread: Math.round(Number(analyticsInput.menuItemMargins.bread) || 0),
+              room: Math.round(Number(analyticsInput.menuItemMargins.room) || 0)
+            }
+          : { ale: 0, mead: 0, stew: 0, bread: 0, room: 0 },
+      anomalyNotes: Array.isArray(analyticsInput.anomalyNotes)
+        ? analyticsInput.anomalyNotes.map((entry) => `${entry}`).slice(0, 8)
+        : [],
+      lastUpdatedDay: Math.max(0, Math.round(Number(analyticsInput.lastUpdatedDay) || 0))
+    },
+    scouting: {
+      scoutQuality: Math.max(20, Math.min(100, Math.round(Number(scoutingInput.scoutQuality) || 52))),
+      reports: scoutingReports,
+      rumors: scoutingRumors,
+      filters: {
+        targetType:
+          typeof scoutingFiltersInput.targetType === "string" && scoutingFiltersInput.targetType.length > 0
+            ? scoutingFiltersInput.targetType
+            : "all",
+        rumorStatus:
+          typeof scoutingFiltersInput.rumorStatus === "string" && scoutingFiltersInput.rumorStatus.length > 0
+            ? scoutingFiltersInput.rumorStatus
+            : "active"
+      },
+      lastSummary:
+        typeof scoutingInput.lastSummary === "string"
+          ? scoutingInput.lastSummary
+          : "Scouting desk is awaiting assignments.",
+      nextRumorDay: Math.max(1, Math.round(Number(scoutingInput.nextRumorDay) || Math.max(2, Number(currentDay) + 1)))
+    }
   };
 }
 
@@ -1572,6 +1885,776 @@ function refreshPlanningContext(options = {}) {
   return guidance;
 }
 
+function messageUrgencyScore(urgency = "medium") {
+  const index = MESSAGE_URGENCY_ORDER.indexOf(`${urgency}`);
+  return index >= 0 ? MESSAGE_URGENCY_ORDER.length - index : 1;
+}
+
+function sortCommandMessages(messages = []) {
+  messages.sort((a, b) => {
+    const unreadA = a.read ? 0 : 1;
+    const unreadB = b.read ? 0 : 1;
+    if (unreadA !== unreadB) {
+      return unreadB - unreadA;
+    }
+    const urgencyDiff = messageUrgencyScore(b.urgency) - messageUrgencyScore(a.urgency);
+    if (urgencyDiff !== 0) {
+      return urgencyDiff;
+    }
+    const dayDiff = (Number(b.day) || 0) - (Number(a.day) || 0);
+    if (dayDiff !== 0) {
+      return dayDiff;
+    }
+    return `${b.id}`.localeCompare(`${a.id}`);
+  });
+}
+
+function buildRecommendationPayload(action, label, confidence, impact, tradeoff) {
+  return {
+    action: typeof action === "string" ? action : "",
+    label: typeof label === "string" && label.length > 0 ? label : "Review",
+    confidence: Math.max(0, Math.min(100, Math.round(Number(confidence) || 50))),
+    impact: Math.max(0, Math.min(100, Math.round(Number(impact) || 50))),
+    tradeoff:
+      typeof tradeoff === "string" && tradeoff.length > 0
+        ? tradeoff
+        : "Balanced short-term and long-term impact."
+  };
+}
+
+function postCommandMessage(payload = {}) {
+  const manager = getManagerState();
+  const board = manager.commandBoard;
+  const message = normalizeManagerMessage(
+    {
+      ...payload,
+      id: typeof payload.id === "string" && payload.id.length > 0 ? payload.id : random.randomId(12),
+      day: Math.max(1, Math.round(Number(payload.day) || state.day)),
+      expiresDay: Math.max(
+        Math.max(1, Math.round(Number(payload.day) || state.day)),
+        Math.round(Number(payload.expiresDay) || state.day + 3)
+      ),
+      recommendation: payload.recommendation || {}
+    },
+    board.messages.length,
+    state.day
+  );
+  if (!message) {
+    return null;
+  }
+  const duplicate = board.messages.find((entry) => {
+    const sameDay = entry.day === message.day;
+    const sameTitle = entry.title === message.title;
+    const sameCategory = entry.category === message.category;
+    return sameDay && sameTitle && sameCategory;
+  });
+  if (duplicate) {
+    duplicate.summary = message.summary;
+    duplicate.urgency = message.urgency;
+    duplicate.read = false;
+    duplicate.confidence = message.confidence;
+    duplicate.impact = message.impact;
+    duplicate.expiresDay = message.expiresDay;
+    duplicate.recommendation = { ...message.recommendation };
+    duplicate.linkedAction = message.linkedAction;
+  } else {
+    board.messages.push(message);
+  }
+  board.messages = board.messages.filter((entry) => entry.expiresDay >= state.day).slice(0, MAX_COMMAND_MESSAGES);
+  sortCommandMessages(board.messages);
+  board.unreadCount = board.messages.filter((entry) => !entry.read).length;
+  board.lastGeneratedDay = state.day;
+  board.lastSummary =
+    board.messages.length > 0
+      ? `${board.unreadCount} unread directives, top priority ${board.messages[0].urgency}.`
+      : "Command board clear.";
+  return message;
+}
+
+function setCommandBoardSection(section = "message_board") {
+  const manager = getManagerState();
+  const nextSection = MANAGER_TOOLING_SECTIONS.includes(`${section}`) ? `${section}` : "message_board";
+  manager.commandBoard.currentSection = nextSection;
+  render();
+  return { ok: true, section: nextSection };
+}
+
+function setCommandBoardFilters(filters = {}) {
+  const manager = getManagerState();
+  if (filters.category !== undefined) {
+    manager.commandBoard.categoryFilter =
+      typeof filters.category === "string" && filters.category.length > 0 ? filters.category : "all";
+  }
+  if (filters.urgency !== undefined) {
+    manager.commandBoard.urgencyFilter =
+      typeof filters.urgency === "string" && filters.urgency.length > 0 ? filters.urgency : "all";
+  }
+  render();
+  return {
+    ok: true,
+    categoryFilter: manager.commandBoard.categoryFilter,
+    urgencyFilter: manager.commandBoard.urgencyFilter
+  };
+}
+
+function markCommandMessageRead(messageId, read = true) {
+  const actionWindow = requireActionWindow("mark_command_message");
+  if (!actionWindow.ok) {
+    logLine(actionWindow.error, "bad");
+    render();
+    return { ok: false, error: actionWindow.error };
+  }
+  const manager = getManagerState();
+  const message = manager.commandBoard.messages.find((entry) => entry.id === messageId);
+  if (!message) {
+    return { ok: false, error: "Command message not found." };
+  }
+  message.read = Boolean(read);
+  manager.commandBoard.unreadCount = manager.commandBoard.messages.filter((entry) => !entry.read).length;
+  sortCommandMessages(manager.commandBoard.messages);
+  render();
+  return { ok: true, unreadCount: manager.commandBoard.unreadCount };
+}
+
+function markAllCommandMessagesRead() {
+  const actionWindow = requireActionWindow("mark_all_command_messages");
+  if (!actionWindow.ok) {
+    logLine(actionWindow.error, "bad");
+    render();
+    return { ok: false, error: actionWindow.error };
+  }
+  const manager = getManagerState();
+  manager.commandBoard.messages.forEach((entry) => {
+    entry.read = true;
+  });
+  manager.commandBoard.unreadCount = 0;
+  sortCommandMessages(manager.commandBoard.messages);
+  render();
+  return { ok: true };
+}
+
+function appendDelegationAudit(roleId, action, result, tone = "neutral", boundary = "day_start") {
+  const manager = getManagerState();
+  const audit = manager.delegation.auditTrail;
+  audit.unshift({
+    id: random.randomId(10),
+    day: state.day,
+    boundary,
+    roleId,
+    action,
+    result,
+    tone
+  });
+  if (audit.length > MAX_DELEGATION_AUDIT_ENTRIES) {
+    audit.length = MAX_DELEGATION_AUDIT_ENTRIES;
+  }
+}
+
+function setDelegationRoleEnabled(roleId, enabled = false) {
+  const actionWindow = requireActionWindow("set_delegation_role");
+  if (!actionWindow.ok) {
+    logLine(actionWindow.error, "bad");
+    render();
+    return { ok: false, error: actionWindow.error };
+  }
+  const manager = getManagerState();
+  const role = manager.delegation.roles[roleId];
+  if (!role) {
+    return { ok: false, error: `Unknown delegation role: ${roleId}.` };
+  }
+  role.enabled = Boolean(enabled);
+  role.note = role.enabled ? "Automation active." : "Manual control.";
+  appendDelegationAudit(
+    roleId,
+    "role_toggle",
+    role.enabled ? `${role.label} delegation enabled.` : `${role.label} delegation disabled.`,
+    role.enabled ? "good" : "neutral",
+    "manual"
+  );
+  render();
+  return { ok: true, role: { ...role } };
+}
+
+function setDelegationTaskEnabled(roleId, taskId, enabled = false) {
+  const actionWindow = requireActionWindow("set_delegation_task");
+  if (!actionWindow.ok) {
+    logLine(actionWindow.error, "bad");
+    render();
+    return { ok: false, error: actionWindow.error };
+  }
+  const manager = getManagerState();
+  const role = manager.delegation.roles[roleId];
+  if (!role) {
+    return { ok: false, error: `Unknown delegation role: ${roleId}.` };
+  }
+  if (!(taskId in role.tasks)) {
+    return { ok: false, error: `Unknown delegation task: ${taskId}.` };
+  }
+  role.tasks[taskId] = Boolean(enabled);
+  appendDelegationAudit(
+    roleId,
+    "task_toggle",
+    `${role.label} task ${taskId} ${role.tasks[taskId] ? "enabled" : "disabled"}.`,
+    "neutral",
+    "manual"
+  );
+  render();
+  return { ok: true, role: { ...role } };
+}
+
+function runDelegatedRoutines(boundary = "day_start") {
+  const manager = getManagerState();
+  if (manager.delegation.lastRunDay === state.day && boundary === "day_start") {
+    return { actions: 0, summary: "Delegation routines already executed today." };
+  }
+  const actions = [];
+  const roles = manager.delegation.roles;
+  const crown = getCrownAuthority();
+  const staffStats = getStaffStats();
+
+  if (roles.head_chef.enabled) {
+    if (roles.head_chef.tasks.menuFallback) {
+      const fallbackSummary = applyMenuFallbackPolicy(manager.committedPlan || manager.planDraft);
+      actions.push(`Head chef: ${fallbackSummary}`);
+      appendDelegationAudit("head_chef", "menu_fallback", fallbackSummary, "neutral", boundary);
+    }
+    if (roles.head_chef.tasks.qualityChecks && state.cleanliness < 60 && state.gold >= 6) {
+      state.gold -= 6;
+      state.cleanliness = clamp(state.cleanliness + 5, 0, 100);
+      const result = "Head chef ran prep-room cleanup (+5 cleanliness, -6 gold).";
+      actions.push(result);
+      appendDelegationAudit("head_chef", "quality_checks", result, "good", boundary);
+    }
+  }
+
+  if (roles.floor_manager.enabled) {
+    if (roles.floor_manager.tasks.fatigueControl && staffStats.avgFatigue >= 62) {
+      state.rotaPreset = "day_heavy";
+      const result = `Floor manager shifted rota to ${ROTA_PRESETS[state.rotaPreset].label} for fatigue control.`;
+      actions.push(result);
+      appendDelegationAudit("floor_manager", "fatigue_control", result, "good", boundary);
+    }
+    if (roles.floor_manager.tasks.serviceRecovery && state.reputation <= 38) {
+      state.reputation = clamp(state.reputation + 1, 0, 100);
+      const result = "Floor manager recovered service flow (+1 reputation).";
+      actions.push(result);
+      appendDelegationAudit("floor_manager", "service_recovery", result, "good", boundary);
+    }
+  }
+
+  if (roles.clerk.enabled) {
+    if (roles.clerk.tasks.complianceFilings && crown.complianceScore < 50 && state.gold >= 12) {
+      state.gold -= 12;
+      crown.complianceScore = clamp(crown.complianceScore + 3, 0, 100);
+      shiftWorldActorStanding("crown_office", 1);
+      const filingResult = "Clerk filed a Crown packet (+3 compliance, -12 gold).";
+      actions.push(filingResult);
+      appendDelegationAudit("clerk", "compliance_filing", filingResult, "good", boundary);
+      postCommandMessage({
+        source: "clerk",
+        urgency: "medium",
+        category: "compliance",
+        title: "Clerk Filing Submitted",
+        summary: filingResult,
+        confidence: 82,
+        impact: 58,
+        linkedAction: "file_compliance",
+        expiresDay: state.day + 2,
+        recommendation: buildRecommendationPayload(
+          "monitor_compliance",
+          "Review Crown ledger",
+          76,
+          50,
+          "Small gold spend for steadier tax oversight."
+        )
+      });
+    }
+    if (roles.clerk.tasks.stockPaperwork && state.world.suppliers.volatility >= 68) {
+      setWorldEffect("supply_reliability", 1, 1.05);
+      const paperworkResult = "Clerk expedited supplier paperwork (+reliability for next day).";
+      actions.push(paperworkResult);
+      appendDelegationAudit("clerk", "stock_paperwork", paperworkResult, "good", boundary);
+    }
+  }
+
+  manager.delegation.lastRunDay = state.day;
+  manager.delegation.lastRunSummary =
+    actions.length > 0 ? actions.join(" ") : "Delegation active but no routine trigger fired.";
+  return {
+    actions: actions.length,
+    summary: manager.delegation.lastRunSummary
+  };
+}
+
+function computeRollingAverage(history, field, count = 7) {
+  const entries = history.slice(0, Math.max(1, count));
+  if (entries.length === 0) {
+    return 0;
+  }
+  const total = entries.reduce((sum, entry) => sum + (Number(entry[field]) || 0), 0);
+  return total / entries.length;
+}
+
+function updateAnalyticsForDay(snapshot = {}) {
+  const manager = getManagerState();
+  const analytics = manager.analytics;
+  const wanted = snapshot.wanted && typeof snapshot.wanted === "object" ? snapshot.wanted : {};
+  const sold = snapshot.sold && typeof snapshot.sold === "object" ? snapshot.sold : {};
+  const wantedTotal = Object.values(wanted).reduce((sum, value) => sum + Math.max(0, Math.round(Number(value) || 0)), 0);
+  const soldTotal = Object.values(sold).reduce((sum, value) => sum + Math.max(0, Math.round(Number(value) || 0)), 0);
+  const conversionPct = wantedTotal > 0 ? Math.round((soldTotal / wantedTotal) * 100) : 100;
+  const retentionPct = Math.max(0, Math.min(100, Math.round(Number(snapshot.retentionPct) || 50)));
+  const revenue = Math.max(0, Math.round(Number(snapshot.revenue) || 0));
+  const net = Math.round(Number(snapshot.net) || 0);
+  const guests = Math.max(0, Math.round(Number(snapshot.guests) || 0));
+  const marginPct = revenue > 0 ? Math.round((net / revenue) * 100) : 0;
+  const avgSpend = guests > 0 ? Number((revenue / guests).toFixed(2)) : 0;
+
+  const menuMargins = {};
+  ["ale", "mead", "stew", "bread", "room"].forEach((item) => {
+    const units = Math.max(0, Math.round(Number(sold[item]) || 0));
+    const revenueItem = units * (Number(state.prices[item]) || 0);
+    const costItem = units * (MENU_MARGIN_COSTS[item] || 0);
+    menuMargins[item] = Math.round(revenueItem - costItem);
+  });
+
+  analytics.history.unshift({
+    day: state.day,
+    guests,
+    revenue,
+    net,
+    conversionPct,
+    retentionPct,
+    avgSpend,
+    marginPct
+  });
+  if (analytics.history.length > MAX_ANALYTICS_HISTORY) {
+    analytics.history.length = MAX_ANALYTICS_HISTORY;
+  }
+
+  const currentWindow = analytics.history.slice(0, 7);
+  const previousWindow = analytics.history.slice(7, 14);
+  const current = {
+    conversionPct: Math.round(computeRollingAverage(currentWindow, "conversionPct", 7)),
+    retentionPct: Math.round(computeRollingAverage(currentWindow, "retentionPct", 7)),
+    marginPct: Math.round(computeRollingAverage(currentWindow, "marginPct", 7)),
+    avgSpend: Number(computeRollingAverage(currentWindow, "avgSpend", 7).toFixed(2))
+  };
+  const previous = {
+    conversionPct: Math.round(computeRollingAverage(previousWindow, "conversionPct", 7)),
+    retentionPct: Math.round(computeRollingAverage(previousWindow, "retentionPct", 7)),
+    marginPct: Math.round(computeRollingAverage(previousWindow, "marginPct", 7)),
+    avgSpend: Number(computeRollingAverage(previousWindow, "avgSpend", 7).toFixed(2))
+  };
+
+  analytics.dailySummary = {
+    conversionPct,
+    retentionPct,
+    marginPct,
+    avgSpend,
+    guests,
+    revenue,
+    net
+  };
+  analytics.deltas = {
+    conversionPct: current.conversionPct - previous.conversionPct,
+    retentionPct: current.retentionPct - previous.retentionPct,
+    marginPct: current.marginPct - previous.marginPct,
+    avgSpend: Number((current.avgSpend - previous.avgSpend).toFixed(2))
+  };
+  analytics.menuItemMargins = menuMargins;
+  analytics.anomalyNotes = [
+    conversionPct < 60 ? "Conversion dipped below 60%." : "",
+    retentionPct < 45 ? "Retention pressure: low loyalty carry-over." : "",
+    marginPct < 10 ? "Margin pressure: weak net position." : "",
+    state.lastReport && state.lastReport.rivalPressure >= 38 ? "Rival pressure elevated." : ""
+  ].filter(Boolean);
+  analytics.lastUpdatedDay = state.day;
+
+  return {
+    conversionPct,
+    retentionPct,
+    marginPct,
+    avgSpend,
+    anomalies: analytics.anomalyNotes.slice()
+  };
+}
+
+function createScoutingReport(targetType = "event") {
+  const manager = getManagerState();
+  const scouting = manager.scouting;
+  let report = null;
+  if (targetType === "recruit" && manager.recruitment.market.length > 0) {
+    const candidate = pick(manager.recruitment.market);
+    report = {
+      targetType: "recruit",
+      targetId: candidate.id,
+      label: candidate.name,
+      summary: `${candidate.name} (${candidate.role}) rumored to have ${candidate.hiddenTraits[0] || "hidden traits"}.`
+    };
+  } else if (targetType === "rival" && Array.isArray(state.world.rivalTaverns) && state.world.rivalTaverns.length > 0) {
+    const rival = pick(state.world.rivalTaverns);
+    report = {
+      targetType: "rival",
+      targetId: rival.id,
+      label: rival.name,
+      summary: `${rival.name} is adjusting price posture in your district.`
+    };
+  } else {
+    const outlook = getWorldLayerStatus({ outlookDays: 5 });
+    const highlights =
+      outlook.handoffContract &&
+      outlook.handoffContract.eventCalendarOutlook &&
+      Array.isArray(outlook.handoffContract.eventCalendarOutlook.highlights)
+        ? outlook.handoffContract.eventCalendarOutlook.highlights
+        : [];
+    report = {
+      targetType: "event",
+      targetId: `event-day-${state.day}`,
+      label: "District Outlook",
+      summary: highlights[0] || "Scouts report steady conditions across nearby districts."
+    };
+  }
+  const confidence = clamp(
+    Math.round(scouting.scoutQuality * 0.72 + randInt(-10, 12)),
+    15,
+    98
+  );
+  const entry = normalizeScoutingReportEntry(
+    {
+      id: random.randomId(10),
+      targetType: report.targetType,
+      targetId: report.targetId,
+      label: report.label,
+      confidence,
+      freshness: 100,
+      summary: report.summary,
+      discoveredDay: state.day,
+      lastUpdatedDay: state.day
+    },
+    0,
+    state.day
+  );
+  scouting.reports.unshift(entry);
+  if (scouting.reports.length > MAX_SCOUTING_REPORTS) {
+    scouting.reports.length = MAX_SCOUTING_REPORTS;
+  }
+  return entry;
+}
+
+function createRumorFromReport(report) {
+  if (!report) {
+    return null;
+  }
+  const truthRoll = random.nextFloat();
+  const truthState = truthRoll < 0.44 ? "true" : truthRoll < 0.74 ? "partial" : "false";
+  const resolveDay = state.day + randInt(2, 5);
+  const effect = {
+    reputationDelta: truthState === "true" ? randInt(1, 3) : truthState === "partial" ? randInt(0, 2) : randInt(-2, 0),
+    actorId: report.targetType === "rival" ? "merchant_houses" : report.targetType === "event" ? "civic_council" : "",
+    actorStandingDelta: truthState === "true" ? 1 : truthState === "false" ? -1 : 0
+  };
+  return normalizeRumorEntry(
+    {
+      id: random.randomId(11),
+      topic: `${report.targetType}_intel`,
+      targetType: report.targetType,
+      targetId: report.targetId,
+      summary: `Rumor: ${report.summary}`,
+      truthState,
+      status: "active",
+      confidence: clamp(Math.round(report.confidence * 0.82 + randInt(-8, 8)), 12, 95),
+      freshness: 100,
+      createdDay: state.day,
+      resolveDay,
+      resolutionNote: "",
+      effect
+    },
+    0,
+    state.day
+  );
+}
+
+function resolveRumor(rumor) {
+  rumor.status = "resolved";
+  rumor.freshness = Math.max(0, rumor.freshness - 18);
+  const effect = rumor.effect || { reputationDelta: 0, actorId: "", actorStandingDelta: 0 };
+  if (effect.reputationDelta !== 0) {
+    state.reputation = clamp(state.reputation + effect.reputationDelta, 0, 100);
+  }
+  if (effect.actorId && effect.actorStandingDelta !== 0) {
+    shiftWorldActorStanding(effect.actorId, effect.actorStandingDelta);
+  }
+  rumor.resolutionNote =
+    rumor.truthState === "true"
+      ? "Scout confirmation: rumor was accurate."
+      : rumor.truthState === "partial"
+        ? "Scout confirmation: rumor was partly accurate."
+        : "Scout confirmation: rumor collapsed as false chatter.";
+  return rumor.resolutionNote;
+}
+
+function updateScoutingForDay() {
+  const manager = getManagerState();
+  const scouting = manager.scouting;
+  scouting.reports.forEach((entry) => {
+    entry.freshness = clamp(entry.freshness - randInt(6, 14), 0, 100);
+    entry.lastUpdatedDay = state.day;
+  });
+  scouting.rumors.forEach((entry) => {
+    entry.freshness = clamp(entry.freshness - randInt(5, 12), 0, 100);
+    if (entry.status === "active" && state.day >= entry.resolveDay) {
+      const resolutionNote = resolveRumor(entry);
+      postCommandMessage({
+        source: "scouting_desk",
+        urgency: entry.truthState === "false" ? "low" : "medium",
+        category: "scouting",
+        title: "Rumor Resolved",
+        summary: `${entry.summary} ${resolutionNote}`,
+        confidence: entry.confidence,
+        impact: Math.abs(entry.effect.reputationDelta) * 20 + 30,
+        linkedAction: "review_scouting",
+        expiresDay: state.day + 4,
+        recommendation: buildRecommendationPayload(
+          "refresh_scouting",
+          "Refresh scouting targets",
+          74,
+          48,
+          "Fresh intel reduces false-positive chatter."
+        )
+      });
+    } else if (entry.status === "active" && entry.freshness <= 10) {
+      entry.status = "expired";
+      entry.resolutionNote = "Rumor expired before confirmation.";
+    }
+  });
+
+  const spawnReport = scouting.reports.length < 4 || state.day % 2 === 0;
+  let newReport = null;
+  let newRumor = null;
+  if (spawnReport) {
+    const targetType = pick(["event", "rival", "recruit"]);
+    newReport = createScoutingReport(targetType);
+  }
+  if (newReport && random.nextFloat() <= 0.6) {
+    newRumor = createRumorFromReport(newReport);
+    if (newRumor) {
+      scouting.rumors.unshift(newRumor);
+      if (scouting.rumors.length > MAX_SCOUTING_RUMORS) {
+        scouting.rumors.length = MAX_SCOUTING_RUMORS;
+      }
+    }
+  }
+  scouting.nextRumorDay = state.day + randInt(1, 3);
+  const activeRumors = scouting.rumors.filter((entry) => entry.status === "active").length;
+  scouting.lastSummary =
+    `Scouting quality ${scouting.scoutQuality}. Reports ${scouting.reports.length}, active rumors ${activeRumors}.` +
+    `${newReport ? ` New intel: ${newReport.label}.` : ""}`;
+  return {
+    newReport,
+    newRumor,
+    activeRumors,
+    summary: scouting.lastSummary
+  };
+}
+
+function runScoutingSweep(targetType = "event") {
+  const actionWindow = requireActionWindow("run_scouting_sweep");
+  if (!actionWindow.ok) {
+    logLine(actionWindow.error, "bad");
+    render();
+    return { ok: false, error: actionWindow.error };
+  }
+  if (!spendGold(7, "Scouting dispatch")) {
+    return { ok: false, error: "Not enough gold for scouting dispatch." };
+  }
+  const report = createScoutingReport(`${targetType}`.toLowerCase());
+  const manager = getManagerState();
+  manager.scouting.scoutQuality = clamp(manager.scouting.scoutQuality + 1, 20, 100);
+  manager.scouting.lastSummary = `Manual scouting sweep filed: ${report.label}.`;
+  postCommandMessage({
+    source: "scouting_desk",
+    urgency: "low",
+    category: "scouting",
+    title: "Scouting Sweep Complete",
+    summary: report.summary,
+    confidence: report.confidence,
+    impact: 34,
+    linkedAction: "review_scouting",
+    expiresDay: state.day + 3,
+    recommendation: buildRecommendationPayload(
+      "review_recruitment",
+      "Review scouting tab",
+      69,
+      36,
+      "Costs gold now but improves hiring and rival forecasting."
+    )
+  });
+  logLine(`Scouting sweep complete: ${report.summary}`, "neutral");
+  render();
+  return { ok: true, report: { ...report } };
+}
+
+function publishDailyCommandBoard(feed = {}) {
+  const manager = getManagerState();
+  const compliance = Number(feed.compliance) || Number(state.lastReport.compliance) || 0;
+  const arrears = Number(feed.arrears) || Number(getCrownAuthority().arrears) || 0;
+  const rivalPressure = Number(feed.rivalPressure) || Number(state.lastReport.rivalPressure) || 0;
+  const staffFatigue = Number(feed.avgFatigue) || Number(getStaffStats().avgFatigue) || 0;
+  const net = Math.round(Number(feed.net) || state.lastNet || 0);
+  const lowStockCount = Object.values(state.inventory).filter((amount) => Number(amount) < 9).length;
+  const objectivePressure = manager.objectives.active.filter((objective) => objective.remainingWeeks <= 1).length;
+  const eventSummary = typeof feed.eventSummary === "string" ? feed.eventSummary : state.lastReport.events || "";
+
+  if (compliance < 48 || arrears > 0) {
+    postCommandMessage({
+      source: "crown_office",
+      urgency: compliance < 42 ? "critical" : "high",
+      category: "compliance",
+      title: "Crown Compliance Pressure",
+      summary:
+        arrears > 0
+          ? `Arrears standing at ${formatCoin(arrears)} with compliance ${compliance}.`
+          : `Compliance rating dropped to ${compliance}.`,
+      confidence: 88,
+      impact: 82,
+      linkedAction: "file_compliance",
+      expiresDay: state.day + 2,
+      recommendation: buildRecommendationPayload(
+        "file_compliance",
+        "File Crown report",
+        86,
+        80,
+        "Immediate filing costs gold but reduces audit and penalty exposure."
+      )
+    });
+  }
+
+  if (lowStockCount >= 4) {
+    postCommandMessage({
+      source: "supplier_network",
+      urgency: "high",
+      category: "supply",
+      title: "Supply Strain Alert",
+      summary: `${lowStockCount} stock lines are under 9 units. Reliability risk is rising.`,
+      confidence: 77,
+      impact: 72,
+      linkedAction: "supplier_actions",
+      expiresDay: state.day + 2,
+      recommendation: buildRecommendationPayload(
+        "restock_supplies",
+        "Prioritize restock",
+        74,
+        71,
+        "Restock spend now prevents demand and margin losses tomorrow."
+      )
+    });
+  }
+
+  if (staffFatigue >= 64) {
+    postCommandMessage({
+      source: "floor_manager",
+      urgency: "medium",
+      category: "staffing",
+      title: "Fatigue Management Warning",
+      summary: `Average staff fatigue reached ${Math.round(staffFatigue)}. Service risk is increasing.`,
+      confidence: 72,
+      impact: 61,
+      linkedAction: "planning_board",
+      expiresDay: state.day + 3,
+      recommendation: buildRecommendationPayload(
+        "adjust_staffing",
+        "Shift to rest focus",
+        71,
+        58,
+        "Lower fatigue now may trim short-term output but protects consistency."
+      )
+    });
+  }
+
+  if (rivalPressure >= 36) {
+    postCommandMessage({
+      source: "district_watch",
+      urgency: "medium",
+      category: "rivalry",
+      title: "Rival Heat Increased",
+      summary: `District rival pressure is ${Math.round(rivalPressure)}%.`,
+      confidence: 67,
+      impact: 55,
+      linkedAction: "pricing_board",
+      expiresDay: state.day + 3,
+      recommendation: buildRecommendationPayload(
+        "rebalance_prices",
+        "Review price board",
+        66,
+        53,
+        "More competitive pricing can recover flow but may reduce per-sale margin."
+      )
+    });
+  }
+
+  if (objectivePressure > 0) {
+    postCommandMessage({
+      source: "objective_office",
+      urgency: "medium",
+      category: "objectives",
+      title: "Objective Deadline Pressure",
+      summary: `${objectivePressure} active objective${objectivePressure === 1 ? "" : "s"} nearing deadline.`,
+      confidence: 79,
+      impact: 59,
+      linkedAction: "objective_board",
+      expiresDay: state.day + 4,
+      recommendation: buildRecommendationPayload(
+        "focus_objectives",
+        "Focus objective progress",
+        76,
+        61,
+        "Objective focus may reduce flexibility for other optimizations."
+      )
+    });
+  }
+
+  if (eventSummary && !/No major/i.test(eventSummary)) {
+    postCommandMessage({
+      source: "calendar_desk",
+      urgency: "low",
+      category: "events",
+      title: "Calendar Event Update",
+      summary: eventSummary,
+      confidence: 65,
+      impact: 46,
+      linkedAction: "world_events",
+      expiresDay: state.day + 3,
+      recommendation: buildRecommendationPayload(
+        "review_event_outlook",
+        "Review event outlook",
+        64,
+        44,
+        "Preparing early can reduce surprise swings from district events."
+      )
+    });
+  }
+
+  postCommandMessage({
+    source: "ledger",
+    urgency: net >= 0 ? "low" : "medium",
+    category: "finance",
+    title: "Daily Ledger Summary",
+    summary: `Day ${state.day} closed at net ${formatCoin(net)} with ${state.lastGuests} guests.`,
+    confidence: 94,
+    impact: net >= 0 ? 40 : 62,
+    linkedAction: "daily_report",
+    expiresDay: state.day + 2,
+    recommendation: buildRecommendationPayload(
+      "review_daily_report",
+      "Review daily report",
+      92,
+      net >= 0 ? 38 : 60,
+      "Consistent review improves planning accuracy over the next week."
+    )
+  });
+}
+
 function getTimeflowTriggerPriority(trigger) {
   return TIMEFLOW_TRIGGER_PRIORITY[trigger] || 0;
 }
@@ -1948,6 +3031,51 @@ function getManagerPhaseStatus() {
       failed: manager.objectives.failed.map((entry) => ({ ...entry })),
       lastSummary: manager.objectives.lastSummary
     },
+    commandBoard: {
+      currentSection: manager.commandBoard.currentSection,
+      categoryFilter: manager.commandBoard.categoryFilter,
+      urgencyFilter: manager.commandBoard.urgencyFilter,
+      unreadCount: manager.commandBoard.unreadCount,
+      lastGeneratedDay: manager.commandBoard.lastGeneratedDay,
+      lastSummary: manager.commandBoard.lastSummary,
+      messages: manager.commandBoard.messages.map((entry) => ({
+        ...entry,
+        recommendation: entry.recommendation ? { ...entry.recommendation } : null
+      }))
+    },
+    delegation: {
+      roles: Object.fromEntries(
+        Object.entries(manager.delegation.roles).map(([roleId, role]) => [
+          roleId,
+          {
+            ...role,
+            tasks: { ...role.tasks }
+          }
+        ])
+      ),
+      auditTrail: manager.delegation.auditTrail.map((entry) => ({ ...entry })),
+      lastRunDay: manager.delegation.lastRunDay,
+      lastRunSummary: manager.delegation.lastRunSummary
+    },
+    analytics: {
+      history: manager.analytics.history.map((entry) => ({ ...entry })),
+      dailySummary: { ...manager.analytics.dailySummary },
+      deltas: { ...manager.analytics.deltas },
+      menuItemMargins: { ...manager.analytics.menuItemMargins },
+      anomalyNotes: manager.analytics.anomalyNotes.slice(),
+      lastUpdatedDay: manager.analytics.lastUpdatedDay
+    },
+    scouting: {
+      scoutQuality: manager.scouting.scoutQuality,
+      reports: manager.scouting.reports.map((entry) => ({ ...entry })),
+      rumors: manager.scouting.rumors.map((entry) => ({
+        ...entry,
+        effect: entry.effect ? { ...entry.effect } : null
+      })),
+      filters: { ...manager.scouting.filters },
+      lastSummary: manager.scouting.lastSummary,
+      nextRumorDay: manager.scouting.nextRumorDay
+    },
     timeline: manager.timeline ? { ...manager.timeline } : null,
     planningContext: manager.planningContext ? { ...manager.planningContext } : null,
     lastWeekSummary: manager.lastWeekSummary,
@@ -2037,8 +3165,70 @@ function getManagerLayerStatus() {
       },
       seasonalTimeline: {
         ...manager.timeline
+      },
+      managerialTooling: {
+        contractVersion: MANAGER_TOOLING_CONTRACT_VERSION,
+        commandBoard: {
+          currentSection: manager.commandBoard.currentSection,
+          unreadCount: manager.commandBoard.unreadCount,
+          topMessages: manager.commandBoard.messages.slice(0, 8).map((entry) => ({
+            id: entry.id,
+            day: entry.day,
+            source: entry.source,
+            urgency: entry.urgency,
+            category: entry.category,
+            title: entry.title,
+            summary: entry.summary,
+            read: entry.read,
+            recommendation: entry.recommendation ? { ...entry.recommendation } : null
+          })),
+          summary: manager.commandBoard.lastSummary
+        },
+        delegatedOutcomes: {
+          roles: Object.fromEntries(
+            Object.entries(manager.delegation.roles).map(([roleId, role]) => [
+              roleId,
+              {
+                enabled: role.enabled,
+                tasks: { ...role.tasks }
+              }
+            ])
+          ),
+          lastRunDay: manager.delegation.lastRunDay,
+          lastRunSummary: manager.delegation.lastRunSummary,
+          recentAudit: manager.delegation.auditTrail.slice(0, 12).map((entry) => ({ ...entry }))
+        },
+        analytics: {
+          dailySummary: { ...manager.analytics.dailySummary },
+          deltas: { ...manager.analytics.deltas },
+          menuItemMargins: { ...manager.analytics.menuItemMargins },
+          anomalies: manager.analytics.anomalyNotes.slice(),
+          lastUpdatedDay: manager.analytics.lastUpdatedDay
+        },
+        intelTimeline: {
+          scoutQuality: manager.scouting.scoutQuality,
+          reports: manager.scouting.reports.slice(0, 12).map((entry) => ({ ...entry })),
+          rumors: manager.scouting.rumors.slice(0, 16).map((entry) => ({
+            ...entry,
+            effect: entry.effect ? { ...entry.effect } : null
+          })),
+          summary: manager.scouting.lastSummary
+        }
       }
     }
+  };
+}
+
+function getManagerToolingStatus() {
+  const manager = getManagerPhaseStatus();
+  return {
+    contractVersion: MANAGER_TOOLING_CONTRACT_VERSION,
+    sections: MANAGER_TOOLING_SECTIONS.slice(),
+    activeSection: manager.commandBoard.currentSection,
+    commandBoard: manager.commandBoard,
+    delegation: manager.delegation,
+    analytics: manager.analytics,
+    scouting: manager.scouting
   };
 }
 
@@ -2697,6 +3887,7 @@ function createInitialState(locationId = DEFAULT_STARTING_LOCATION) {
       crownSummary: "Crown ledger current. Next collection due on Day 7.",
       objectiveSummary: "Objective board not generated yet.",
       seasonSummary: "Year 1, Spring week 1.",
+      managerToolingSummary: "Command board and delegation desks are standing by.",
       compliance: initialCrown.complianceScore,
       rivalPressure: Math.round(
         (startingDistrict.rivalTaverns.reduce((sum, rival) => sum + rival.pressure, 0) /
@@ -4952,6 +6143,7 @@ function repairTavern() {
     state.day += 1;
     const dayQueueResult = flushPlanningIntentQueue("day_start");
     const timeline = refreshSeasonTimeline();
+    const delegationRun = runDelegatedRoutines("day_start");
     const supplierNetworkSummary = progressSupplierNetwork();
     const supplyPlannerResult = applyWeeklySupplyPlannerBeforeDay();
     const supplierSummary = `${supplierNetworkSummary} ${supplyPlannerResult.summary}`;
@@ -5135,7 +6327,9 @@ function repairTavern() {
       lowGroupStandingScore: state.world.reputationModel.groups.crown_office.score,
       crownComplianceStanding: state.world.reputationModel.crownComplianceStanding,
       worldLayerSummary: state.lastReport.worldLayerSummary || "World layer updates pending for today.",
-      weeklyWorldSummary: state.world.reporting.lastWeeklySummary
+      weeklyWorldSummary: state.world.reporting.lastWeeklySummary,
+      delegationSummary: delegationRun.summary,
+      managerToolingSummary: "Manager tooling update pending."
     };
     state.lastReport.timeflowQueueSummary = state.timeflow ? state.timeflow.lastQueueSummary : "No queue summary.";
     state.lastReport.seasonSummary = `Year ${timeline.year}, ${timeline.seasonLabel} week ${timeline.weekOfSeason}.`;
@@ -5145,6 +6339,40 @@ function repairTavern() {
       net
     });
     state.lastReport.objectiveSummary = getManagerState().objectives.lastSummary;
+    const analyticsSummary = updateAnalyticsForDay({
+      wanted: {
+        ale: aleDemand,
+        mead: meadDemand,
+        stew: stewDemand,
+        bread: breadDemand,
+        room: roomDemand
+      },
+      sold: {
+        ale: soldAle,
+        mead: soldMead,
+        stew: soldStew,
+        bread: soldBread,
+        room: soldRooms
+      },
+      guests,
+      revenue,
+      net,
+      retentionPct: state.lastReport.topCohortLoyalty
+    });
+    const scoutingSummary = updateScoutingForDay();
+    publishDailyCommandBoard({
+      compliance: state.lastReport.compliance,
+      arrears: getCrownAuthority().arrears,
+      rivalPressure: state.lastReport.rivalPressure,
+      avgFatigue: staffIncidentSummary.avgFatigue,
+      net,
+      eventSummary: calendarEventSummary
+    });
+    state.lastReport.managerToolingSummary =
+      `Command board: ${getManagerState().commandBoard.lastSummary} ` +
+      `Delegation: ${delegationRun.summary} ` +
+      `Analytics: conversion ${analyticsSummary.conversionPct}% margin ${analyticsSummary.marginPct}%. ` +
+      `Scouting: ${scoutingSummary.summary}`;
 
     const repSwing = Math.round((satisfaction - 0.64) * 11);
     const rivalReputationDrag = Math.max(
@@ -5265,6 +6493,12 @@ function repairTavern() {
     }
     if (weeklyWorldReport.weekClosed) {
       logLine(state.lastReport.weeklyWorldSummary, "neutral");
+    }
+    if (delegationRun.actions > 0) {
+      logLine(delegationRun.summary, "neutral");
+    }
+    if (scoutingSummary.newRumor) {
+      logLine(`New rumor logged: ${scoutingSummary.newRumor.summary}`, "neutral");
     }
 
     logLine(
@@ -5591,6 +6825,42 @@ function initGame() {
   logLine(`Planning context synced from world layer: ${planningGuidance.summary}`, "neutral");
   logLine(`Recruitment board: ${recruitmentSummary}`, "neutral");
   logLine(`Objective board: ${objectiveSummary}`, "neutral");
+  postCommandMessage({
+    source: "command_center",
+    urgency: "medium",
+    category: "operations",
+    title: "Campaign Command Board Online",
+    summary: `Week ${manager.weekIndex} opened in ${manager.phase} phase. Review planning and staffing cadence.`,
+    confidence: 92,
+    impact: 54,
+    linkedAction: "planning_board",
+    expiresDay: state.day + 3,
+    recommendation: buildRecommendationPayload(
+      "review_planning",
+      "Review weekly plan",
+      90,
+      58,
+      "Early plan corrections reduce downstream disruption."
+    )
+  });
+  postCommandMessage({
+    source: "analytics_desk",
+    urgency: "low",
+    category: "analytics",
+    title: "Analytics Baseline Ready",
+    summary: "Daily conversion, retention, and menu margin tracking starts after first day close.",
+    confidence: 88,
+    impact: 38,
+    linkedAction: "analytics_dashboard",
+    expiresDay: state.day + 5,
+    recommendation: buildRecommendationPayload(
+      "review_dashboard",
+      "Open analytics dashboard",
+      83,
+      40,
+      "Baseline review helps catch weak signals early."
+    )
+  });
   if (!executionReady.ok) {
     logLine(`Live execution warning: ${executionReady.error}`, "bad");
   } else {
@@ -5616,6 +6886,7 @@ export {
   getTimeflowContractStatus,
   getTimeflowDiagnostics,
   getManagerPhaseStatus,
+  getManagerToolingStatus,
   getManagerLayerStatus,
   getSimulationClockStatus,
   listTravelOptions,
@@ -5637,9 +6908,16 @@ export {
   getStaffStats,
   setRotaPreset,
   updateWeeklyPlanDraft,
+  setCommandBoardSection,
+  setCommandBoardFilters,
+  markCommandMessageRead,
+  markAllCommandMessagesRead,
+  setDelegationRoleEnabled,
+  setDelegationTaskEnabled,
   commitWeeklyPlan,
   shortlistRecruitCandidate,
   scoutRecruitCandidate,
+  runScoutingSweep,
   signRecruitCandidate,
   startDistrictTravel,
   fileComplianceReport,
