@@ -1,10 +1,22 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   advanceDay,
+  advanceSimulationMinutes,
+  commitWeeklyPlan,
+  loadGame,
+  getManagerLayerStatus,
+  getManagerPhaseStatus,
+  getTimeflowContractStatus,
   getWorldLayerStatus,
   listScenarios,
   loadScenario,
-  saveGame
+  runMarketing,
+  saveGame,
+  signLocalBrokerContract,
+  state,
+  setTimeflowParityStatus,
+  updateWeeklyPlanDraft
 } from "../../src/engine/gameEngine.js";
 
 function isFiniteNumber(value) {
@@ -390,6 +402,19 @@ function collectStateErrors(state) {
       }
     }
   }
+  if (!state.timeflow || typeof state.timeflow !== "object") {
+    errors.push("timeflow payload missing");
+  } else {
+    if (!Array.isArray(state.timeflow.intentQueue)) {
+      errors.push("timeflow.intentQueue missing");
+    }
+    if (!state.timeflow.boundaries || typeof state.timeflow.boundaries !== "object") {
+      errors.push("timeflow.boundaries missing");
+    }
+    if (!state.timeflow.diagnostics || typeof state.timeflow.diagnostics !== "object") {
+      errors.push("timeflow.diagnostics missing");
+    }
+  }
 
   return errors;
 }
@@ -465,12 +490,303 @@ function collectWorldLayerErrors(payload) {
   return errors;
 }
 
+function collectManagerErrors(state) {
+  const errors = [];
+  if (!state.manager || typeof state.manager !== "object") {
+    return ["manager payload missing"];
+  }
+  const manager = state.manager;
+  if (typeof manager.phase !== "string" || manager.phase.length === 0) {
+    errors.push("manager phase missing");
+  }
+  if (!isInteger(manager.weekIndex) || manager.weekIndex < 1) {
+    errors.push(`manager weekIndex invalid: ${manager.weekIndex}`);
+  }
+  if (!isInteger(manager.dayInWeek) || manager.dayInWeek < 1 || manager.dayInWeek > 7) {
+    errors.push(`manager dayInWeek invalid: ${manager.dayInWeek}`);
+  }
+  if (!manager.planDraft || typeof manager.planDraft !== "object") {
+    errors.push("manager planDraft missing");
+  }
+  if (!manager.recruitment || typeof manager.recruitment !== "object") {
+    errors.push("manager recruitment missing");
+  } else if (!Array.isArray(manager.recruitment.market)) {
+    errors.push("manager recruitment market missing");
+  }
+  if (!manager.objectives || typeof manager.objectives !== "object") {
+    errors.push("manager objectives missing");
+  } else {
+    if (!Array.isArray(manager.objectives.active)) {
+      errors.push("manager objectives.active missing");
+    }
+    if (!Array.isArray(manager.objectives.completed)) {
+      errors.push("manager objectives.completed missing");
+    }
+    if (!Array.isArray(manager.objectives.failed)) {
+      errors.push("manager objectives.failed missing");
+    }
+  }
+  if (!manager.timeline || typeof manager.timeline !== "object") {
+    errors.push("manager timeline missing");
+  } else {
+    if (typeof manager.timeline.seasonId !== "string" || manager.timeline.seasonId.length === 0) {
+      errors.push("manager timeline seasonId missing");
+    }
+    if (!isInteger(manager.timeline.weekOfSeason) || manager.timeline.weekOfSeason < 1 || manager.timeline.weekOfSeason > 4) {
+      errors.push(`manager timeline weekOfSeason invalid: ${manager.timeline.weekOfSeason}`);
+    }
+  }
+  return errors;
+}
+
+function collectManagerLayerErrors(payload) {
+  const errors = [];
+  if (!payload || typeof payload !== "object") {
+    return ["manager layer payload missing"];
+  }
+  if (!isInteger(payload.contractVersion) || payload.contractVersion < 1) {
+    errors.push(`manager layer contractVersion invalid: ${payload.contractVersion}`);
+  }
+  if (!payload.handoffContract || typeof payload.handoffContract !== "object") {
+    errors.push("manager layer handoffContract missing");
+    return errors;
+  }
+  const handoff = payload.handoffContract;
+  if (!handoff.phaseState || typeof handoff.phaseState !== "object") {
+    errors.push("manager layer phaseState missing");
+  }
+  if (!handoff.weeklyPlan || typeof handoff.weeklyPlan !== "object") {
+    errors.push("manager layer weeklyPlan missing");
+  }
+  if (!handoff.staffingDecisions || typeof handoff.staffingDecisions !== "object") {
+    errors.push("manager layer staffingDecisions missing");
+  }
+  if (!handoff.recruitmentIntel || typeof handoff.recruitmentIntel !== "object") {
+    errors.push("manager layer recruitmentIntel missing");
+  } else if (!Array.isArray(handoff.recruitmentIntel.market)) {
+    errors.push("manager layer recruitmentIntel.market missing");
+  }
+  if (!handoff.objectiveTimeline || typeof handoff.objectiveTimeline !== "object") {
+    errors.push("manager layer objectiveTimeline missing");
+  } else if (!Array.isArray(handoff.objectiveTimeline.active)) {
+    errors.push("manager layer objectiveTimeline.active missing");
+  }
+  if (!handoff.seasonalTimeline || typeof handoff.seasonalTimeline !== "object") {
+    errors.push("manager layer seasonalTimeline missing");
+  }
+  return errors;
+}
+
 function createSignature(snapshot) {
   const stablePayload = JSON.stringify({
     random: snapshot.random,
     state: snapshot.state
   });
   return createHash("sha256").update(stablePayload).digest("hex");
+}
+
+function createGameplaySignature(snapshot) {
+  const cloned = JSON.parse(JSON.stringify(snapshot.state));
+  delete cloned.log;
+  delete cloned.clock;
+  delete cloned.timeflow;
+  if (cloned.lastReport && typeof cloned.lastReport === "object") {
+    delete cloned.lastReport.timeflowSummary;
+    delete cloned.lastReport.timeflowQueueSummary;
+  }
+  return createHash("sha256").update(JSON.stringify(cloned)).digest("hex");
+}
+
+function readRepoFile(relativePathFromScript) {
+  return readFileSync(new URL(relativePathFromScript, import.meta.url), "utf8");
+}
+
+function assertNoLegacyGuildTerms() {
+  const configText = readRepoFile("../../src/engine/config.js");
+  const pixelText = readRepoFile("../../src/ui/pixelRenderer.js");
+  if (configText.includes("guild_inspector")) {
+    throw new Error("legacy terminology remains in config.js (guild_inspector)");
+  }
+  if (pixelText.includes("guild_inspector")) {
+    throw new Error("legacy terminology remains in pixelRenderer.js (guild_inspector)");
+  }
+  if (pixelText.includes("guild quarter")) {
+    throw new Error('legacy terminology remains in pixelRenderer.js ("guild quarter")');
+  }
+}
+
+function runDebugStabilizationChecks(scenario) {
+  const seed = scenario.recommendedSeed;
+
+  const idempotencyBoot = loadScenario(scenario.id, seed);
+  if (!idempotencyBoot.ok) {
+    throw new Error(`debug idempotency boot failed: ${idempotencyBoot.error}`);
+  }
+  const before = saveGame();
+  const loadResult = loadGame(before);
+  if (!loadResult.ok) {
+    throw new Error(`debug idempotency load failed: ${loadResult.error}`);
+  }
+  const after = saveGame();
+  if (JSON.stringify(before.state) !== JSON.stringify(after.state)) {
+    throw new Error("load/save idempotency mismatch: state changed after direct round-trip load");
+  }
+  if (JSON.stringify(before.random) !== JSON.stringify(after.random)) {
+    throw new Error("load/save idempotency mismatch: random controller changed after direct round-trip load");
+  }
+
+  const phaseBoot = loadScenario(scenario.id, seed);
+  if (!phaseBoot.ok) {
+    throw new Error(`debug phase-fidelity boot failed: ${phaseBoot.error}`);
+  }
+  state.manager.phase = "planning";
+  state.manager.planCommitted = false;
+  state.manager.committedPlan = null;
+  const planningSnapshot = saveGame();
+  const planningLoad = loadGame(planningSnapshot);
+  if (!planningLoad.ok) {
+    throw new Error(`debug phase-fidelity load failed: ${planningLoad.error}`);
+  }
+  const restoredPhase = getManagerPhaseStatus().phase;
+  if (restoredPhase !== "planning") {
+    throw new Error(`phase fidelity failed: expected planning, got ${restoredPhase}`);
+  }
+
+  const retryBoot = loadScenario(scenario.id, seed);
+  if (!retryBoot.ok) {
+    throw new Error(`debug boundary retry boot failed: ${retryBoot.error}`);
+  }
+  state.manager.phase = "planning";
+  state.manager.planCommitted = false;
+  state.manager.committedPlan = null;
+  state.clock.minuteOfDay = 600;
+  const firstAttempt = advanceDay({ autoPrepareExecution: false, trigger: "manual_skip" });
+  if (firstAttempt.ok) {
+    throw new Error("boundary retry check expected first attempt to fail in planning mode");
+  }
+  const secondAttempt = advanceDay({ autoPrepareExecution: false, trigger: "manual_skip" });
+  if (secondAttempt.ok) {
+    throw new Error("boundary retry check expected second attempt to fail in planning mode");
+  }
+  if ((secondAttempt.error || "").includes("Duplicate boundary resolution blocked")) {
+    throw new Error("boundary retry check failed: duplicate guard blocked a same-minute retry after failure");
+  }
+
+  const lockBoot = loadScenario(scenario.id, seed);
+  if (!lockBoot.ok) {
+    throw new Error(`debug lock boot failed: ${lockBoot.error}`);
+  }
+  state.timeflow.inProgress = true;
+  const marketingBlocked = runMarketing();
+  if (!marketingBlocked || marketingBlocked.ok !== false || !(marketingBlocked.error || "").includes("blocked during boundary resolution")) {
+    throw new Error("action lock check failed: runMarketing should be blocked during boundary resolution");
+  }
+  const contractBlocked = signLocalBrokerContract();
+  if (!contractBlocked || contractBlocked.ok !== false || !(contractBlocked.error || "").includes("blocked during boundary resolution")) {
+    throw new Error("action lock check failed: signLocalBrokerContract should be blocked during boundary resolution");
+  }
+  const draftBlocked = updateWeeklyPlanDraft({ note: "locked" });
+  if (!draftBlocked || draftBlocked.ok !== false || !(draftBlocked.error || "").includes("blocked during boundary resolution")) {
+    throw new Error("action lock check failed: updateWeeklyPlanDraft should be blocked during boundary resolution");
+  }
+  state.timeflow.inProgress = false;
+
+  const migrationBoot = loadScenario(scenario.id, seed);
+  if (!migrationBoot.ok) {
+    throw new Error(`debug migration boot failed: ${migrationBoot.error}`);
+  }
+  const current = saveGame();
+  const legacyPayload = { state: JSON.parse(JSON.stringify(current.state)) };
+  const migrated = loadGame(legacyPayload);
+  if (!migrated.ok) {
+    throw new Error(`debug migration check failed: ${migrated.error}`);
+  }
+  if (!Array.isArray(migrated.migrations) || !migrated.migrations.includes("0->1")) {
+    throw new Error("debug migration check failed: expected 0->1 migration to be reported");
+  }
+
+  assertNoLegacyGuildTerms();
+}
+
+function runHybridTimeflowChecks(scenario) {
+  const seed = scenario.recommendedSeed;
+
+  const liveBoot = loadScenario(scenario.id, seed);
+  if (!liveBoot.ok) {
+    throw new Error(`hybrid parity boot failed: ${liveBoot.error}`);
+  }
+  const liveResult = advanceSimulationMinutes(1440);
+  if (!liveResult.ok) {
+    throw new Error(`hybrid parity live rollover failed: ${liveResult.error}`);
+  }
+  const liveStateSignature = createGameplaySignature(saveGame());
+
+  const skipBoot = loadScenario(scenario.id, seed);
+  if (!skipBoot.ok) {
+    throw new Error(`hybrid parity skip boot failed: ${skipBoot.error}`);
+  }
+  const skipResult = advanceDay({ trigger: "manual_skip" });
+  if (!skipResult.ok) {
+    throw new Error(`hybrid parity skip failed: ${skipResult.error}`);
+  }
+  const skipStateSignature = createGameplaySignature(saveGame());
+  if (liveStateSignature !== skipStateSignature) {
+    throw new Error(
+      `hybrid parity mismatch live=${liveStateSignature.slice(0, 12)} skip=${skipStateSignature.slice(0, 12)}`
+    );
+  }
+
+  const speedOneBoot = loadScenario(scenario.id, seed);
+  if (!speedOneBoot.ok) {
+    throw new Error(`speed parity boot (x1) failed: ${speedOneBoot.error}`);
+  }
+  for (let i = 0; i < 1440; i += 1) {
+    const tick = advanceSimulationMinutes(1);
+    if (!tick.ok) {
+      throw new Error(`speed parity x1 tick failed at ${i}: ${tick.error}`);
+    }
+  }
+  const speedOneSignature = createGameplaySignature(saveGame());
+
+  const speedFourBoot = loadScenario(scenario.id, seed);
+  if (!speedFourBoot.ok) {
+    throw new Error(`speed parity boot (x4) failed: ${speedFourBoot.error}`);
+  }
+  for (let i = 0; i < 360; i += 1) {
+    const tick = advanceSimulationMinutes(4);
+    if (!tick.ok) {
+      throw new Error(`speed parity x4 tick failed at ${i}: ${tick.error}`);
+    }
+  }
+  const speedFourSignature = createGameplaySignature(saveGame());
+  if (speedOneSignature !== speedFourSignature) {
+    throw new Error(
+      `speed parity mismatch x1=${speedOneSignature.slice(0, 12)} x4=${speedFourSignature.slice(0, 12)}`
+    );
+  }
+
+  const queueBoot = loadScenario(scenario.id, seed);
+  if (!queueBoot.ok) {
+    throw new Error(`queue collision boot failed: ${queueBoot.error}`);
+  }
+  updateWeeklyPlanDraft({ pricingIntent: "value", logisticsIntent: "local" });
+  updateWeeklyPlanDraft({ pricingIntent: "premium", logisticsIntent: "caravan_watch" });
+  const queueBefore = getManagerPhaseStatus();
+  if (!Array.isArray(queueBefore.pendingIntents) || queueBefore.pendingIntents.length === 0) {
+    throw new Error("queue collision setup failed: pending intents were not queued");
+  }
+  const queueAdvance = advanceDay({ trigger: "manual_skip" });
+  if (!queueAdvance.ok) {
+    throw new Error(`queue collision resolve failed: ${queueAdvance.error}`);
+  }
+  const queueAfter = getManagerPhaseStatus();
+  const committedPricing =
+    queueAfter.committedPlan && typeof queueAfter.committedPlan === "object"
+      ? queueAfter.committedPlan.pricingIntent
+      : null;
+  if (committedPricing !== "premium") {
+    throw new Error(`queue collision expected pricingIntent premium, got ${committedPricing}`);
+  }
 }
 
 function runScenario(scenario) {
@@ -480,13 +796,59 @@ function runScenario(scenario) {
   }
 
   for (let i = 0; i < scenario.regressionDays; i += 1) {
-    advanceDay();
+    const manager = getManagerPhaseStatus();
+    if (manager.phase === "planning") {
+      updateWeeklyPlanDraft({
+        reserveGoldTarget: 5,
+        supplyBudgetCap: 10,
+        marketingIntent: "steady",
+        riskTolerance: "low",
+        logisticsIntent: "caravan_watch"
+      });
+      const commit = commitWeeklyPlan();
+      if (!commit.ok) {
+        throw new Error(`failed to commit weekly plan: ${commit.error}`);
+      }
+    }
+    const dayResult = advanceDay();
+    if (!dayResult || dayResult.ok === false) {
+      throw new Error(`advanceDay failed: ${dayResult && dayResult.error ? dayResult.error : "unknown reason"}`);
+    }
   }
 
   const snapshot = saveGame();
   const errors = collectStateErrors(snapshot.state);
   const worldLayerErrors = collectWorldLayerErrors(getWorldLayerStatus());
+  const managerErrors = collectManagerErrors(snapshot.state);
+  const managerLayerErrors = collectManagerLayerErrors(getManagerLayerStatus());
   errors.push(...worldLayerErrors);
+  errors.push(...managerErrors);
+  errors.push(...managerLayerErrors);
+  const timeflow = getTimeflowContractStatus();
+  if (!timeflow || typeof timeflow !== "object") {
+    errors.push("timeflow contract status missing");
+  } else {
+    if (!isInteger(timeflow.version) || timeflow.version < 1) {
+      errors.push(`timeflow version invalid: ${timeflow.version}`);
+    }
+    if (!Array.isArray(timeflow.boundaryOrder) || timeflow.boundaryOrder.length < 4) {
+      errors.push("timeflow boundary order missing");
+    }
+    if (!Array.isArray(timeflow.triggerPrecedence) || timeflow.triggerPrecedence.length < 3) {
+      errors.push("timeflow trigger precedence missing");
+    }
+    if (!timeflow.runtime || typeof timeflow.runtime !== "object") {
+      errors.push("timeflow runtime missing");
+    }
+  }
+  try {
+    runHybridTimeflowChecks(scenario);
+    runDebugStabilizationChecks(scenario);
+    setTimeflowParityStatus("pass");
+  } catch (error) {
+    setTimeflowParityStatus("fail");
+    throw error;
+  }
   if (errors.length > 0) {
     throw new Error(errors.join(" | "));
   }

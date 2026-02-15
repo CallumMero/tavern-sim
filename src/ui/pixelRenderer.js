@@ -11,7 +11,7 @@ const CHARACTER_ASSET_FILES = {
   blacksmith: "blacksmith.png",
   cook: "cook.png",
   guard: "guard.png",
-  guild_inspector: "guild inspector.png",
+  royal_inspector: "guild inspector.png",
   herbologist: "herbologist.png",
   merchant: "merchant.png",
   regular: "regular.png",
@@ -27,7 +27,7 @@ const CHARACTER_SPRITE_HINTS = {
   blacksmith: { mode: "duo" },
   cook: { mode: "duo" },
   guard: { mode: "duo" },
-  guild_inspector: { mode: "duo" },
+  royal_inspector: { mode: "duo" },
   herbologist: { mode: "duo" },
   merchant: { mode: "duo" },
   regular: { mode: "duo" },
@@ -50,7 +50,7 @@ const COHORT_SPRITE_PREFS = {
   locals: ["regular"],
   adventurers: ["adventurer_mele", "adventurer_rogue"],
   merchants: ["merchant"],
-  nobles: ["guild_inspector", "merchant"]
+  nobles: ["royal_inspector", "merchant"]
 };
 
 const CAMEO_SPRITES = ["bard", "blacksmith", "herbologist"];
@@ -630,7 +630,7 @@ function drawHud(ctx, state) {
 
   const sentiment = state.lastReport && state.lastReport.highlight
     ? state.lastReport.highlight
-    : "Welcome to the guild quarter tavern.";
+    : "Welcome to the Crown quarter tavern.";
 
   ctx.fillStyle = "#f5e5c4";
   ctx.font = "7px monospace";

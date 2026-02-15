@@ -14,7 +14,7 @@ const STARTING_LOCATION_PROFILES = {
     eventChanceMult: 1.18,
     eventWeights: {
       traveling_bard: 1.15,
-      guild_inspector: 1.35,
+      royal_inspector: 1.35,
       bar_brawl: 1.25,
       merchant_caravan: 1.08,
       spoiled_cask: 1,
@@ -43,7 +43,7 @@ const STARTING_LOCATION_PROFILES = {
     eventChanceMult: 0.82,
     eventWeights: {
       traveling_bard: 0.95,
-      guild_inspector: 0.7,
+      royal_inspector: 0.7,
       bar_brawl: 0.7,
       merchant_caravan: 1.24,
       spoiled_cask: 0.9,

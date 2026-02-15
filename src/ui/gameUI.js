@@ -14,6 +14,16 @@ import {
   scheduleCityStockRun,
   startDistrictTravel,
   startNewGame,
+  getManagerPhaseStatus,
+  getSimulationClockStatus,
+  getTimeflowContractStatus,
+  setSimulationSpeed,
+  advanceSimulationMinutes,
+  updateWeeklyPlanDraft,
+  commitWeeklyPlan,
+  shortlistRecruitCandidate,
+  scoutRecruitCandidate,
+  signRecruitCandidate,
   setOnChange,
   formatCoin,
   qualityTier,
@@ -33,6 +43,8 @@ import {
 } from "../engine/gameEngine.js";
 import { createPixelRenderer } from "./pixelRenderer.js";
 
+let simulationTickerHandle = null;
+
 function byId(id, documentRef) {
   return documentRef.getElementById(id);
 }
@@ -47,6 +59,29 @@ export function createGameUI(documentRef = document) {
     crownStatusView: byId("crownStatusView", documentRef),
     supplierStatusView: byId("supplierStatusView", documentRef),
     worldActorsView: byId("worldActorsView", documentRef),
+    clockStatusView: byId("clockStatusView", documentRef),
+    pauseSimBtn: byId("pauseSimBtn", documentRef),
+    playSimBtn: byId("playSimBtn", documentRef),
+    fast2SimBtn: byId("fast2SimBtn", documentRef),
+    fast4SimBtn: byId("fast4SimBtn", documentRef),
+    nextDayBtn: byId("nextDayBtn", documentRef),
+    travelBtn: byId("travelBtn", documentRef),
+    marketingBtn: byId("marketingBtn", documentRef),
+    festivalBtn: byId("festivalBtn", documentRef),
+    signLocalContractBtn: byId("signLocalContractBtn", documentRef),
+    signWholesaleContractBtn: byId("signWholesaleContractBtn", documentRef),
+    stockRunBtn: byId("stockRunBtn", documentRef),
+    updatePlanDraftBtn: byId("updatePlanDraftBtn", documentRef),
+    commitPlanBtn: byId("commitPlanBtn", documentRef),
+    planningStatusView: byId("planningStatusView", documentRef),
+    planStaffingSelect: byId("planStaffingSelect", documentRef),
+    planPricingSelect: byId("planPricingSelect", documentRef),
+    planProcurementSelect: byId("planProcurementSelect", documentRef),
+    planMarketingSelect: byId("planMarketingSelect", documentRef),
+    planLogisticsSelect: byId("planLogisticsSelect", documentRef),
+    planRiskSelect: byId("planRiskSelect", documentRef),
+    planReserveInput: byId("planReserveInput", documentRef),
+    planNoteInput: byId("planNoteInput", documentRef),
     topStats: byId("topStats", documentRef),
     inventoryView: byId("inventoryView", documentRef),
     priceView: byId("priceView", documentRef),
@@ -55,6 +90,20 @@ export function createGameUI(documentRef = document) {
     logView: byId("logView", documentRef)
   };
   const pixelRenderer = createPixelRenderer(el.sceneCanvas);
+  if (simulationTickerHandle) {
+    window.clearInterval(simulationTickerHandle);
+  }
+  simulationTickerHandle = window.setInterval(() => {
+    const clock = getSimulationClockStatus();
+    if (clock.speed > 0) {
+      const tick = advanceSimulationMinutes(clock.speed);
+      if (!tick.ok) {
+        setSimulationSpeed(0);
+      }
+    }
+    renderTopStats(el);
+    renderSimulationClock(el);
+  }, 1000);
 
   bindActions(documentRef, el);
   setOnChange(() => {
@@ -70,7 +119,13 @@ export function createGameUI(documentRef = document) {
       render(el);
       pixelRenderer.render(state);
     },
-    destroy: () => pixelRenderer.destroy()
+    destroy: () => {
+      if (simulationTickerHandle) {
+        window.clearInterval(simulationTickerHandle);
+        simulationTickerHandle = null;
+      }
+      pixelRenderer.destroy();
+    }
   };
 }
 
@@ -126,8 +181,46 @@ function bindActions(documentRef, el) {
       window.alert(result.error);
     }
   });
+  byId("updatePlanDraftBtn", documentRef).addEventListener("click", () => {
+    const result = updateWeeklyPlanDraft(readWeeklyDraftInput(el));
+    if (!result.ok) {
+      window.alert(result.error);
+    }
+  });
+  byId("commitPlanBtn", documentRef).addEventListener("click", () => {
+    const draftUpdate = updateWeeklyPlanDraft(readWeeklyDraftInput(el));
+    if (!draftUpdate.ok) {
+      window.alert(draftUpdate.error);
+      return;
+    }
+    const result = commitWeeklyPlan();
+    if (!result.ok) {
+      window.alert(result.error);
+    }
+  });
 
-  byId("nextDayBtn", documentRef).addEventListener("click", advanceDay);
+  if (el.pauseSimBtn) {
+    el.pauseSimBtn.addEventListener("click", () => {
+      setSimulationSpeed(0);
+    });
+  }
+  if (el.playSimBtn) {
+    el.playSimBtn.addEventListener("click", () => {
+      setSimulationSpeed(1);
+    });
+  }
+  if (el.fast2SimBtn) {
+    el.fast2SimBtn.addEventListener("click", () => {
+      setSimulationSpeed(2);
+    });
+  }
+  if (el.fast4SimBtn) {
+    el.fast4SimBtn.addEventListener("click", () => {
+      setSimulationSpeed(4);
+    });
+  }
+
+  byId("nextDayBtn", documentRef).addEventListener("click", () => advanceDay({ trigger: "manual_skip" }));
 
   byId("brewAleBtn", documentRef).addEventListener("click", () => {
     craft(
@@ -199,21 +292,51 @@ function bindActions(documentRef, el) {
   });
 
   el.staffView.addEventListener("click", (event) => {
-    const btn = event.target.closest("button[data-fire-id]");
-    if (!btn) {
+    const fireBtn = event.target.closest("button[data-fire-id]");
+    if (fireBtn) {
+      const id = fireBtn.getAttribute("data-fire-id");
+      fireStaff(id);
       return;
     }
-    const id = btn.getAttribute("data-fire-id");
-    fireStaff(id);
+    const shortlistBtn = event.target.closest("button[data-shortlist-id]");
+    if (shortlistBtn) {
+      const id = shortlistBtn.getAttribute("data-shortlist-id");
+      const result = shortlistRecruitCandidate(id);
+      if (!result.ok) {
+        window.alert(result.error);
+      }
+      return;
+    }
+    const scoutBtn = event.target.closest("button[data-scout-id]");
+    if (scoutBtn) {
+      const id = scoutBtn.getAttribute("data-scout-id");
+      const result = scoutRecruitCandidate(id);
+      if (!result.ok) {
+        window.alert(result.error);
+      }
+      return;
+    }
+    const signBtn = event.target.closest("button[data-sign-id]");
+    if (signBtn) {
+      const id = signBtn.getAttribute("data-sign-id");
+      const result = signRecruitCandidate(id);
+      if (!result.ok) {
+        window.alert(result.error);
+      }
+    }
   });
 }
 
 function render(el) {
   syncCampaignControls(el);
+  syncTimeflowInteractionLocks(el);
   populateTravelOptions(el.travelDestinationSelect);
+  renderSimulationClock(el);
   renderDistrictTravel(el);
   renderCrownStatus(el);
   renderSupplierStatus(el);
+  renderPlanningStatus(el);
+  syncPlanningControls(el);
   renderWorldActors(el);
   renderTopStats(el);
   renderInventory(el);
@@ -223,15 +346,100 @@ function render(el) {
   renderLog(el);
 }
 
+function syncTimeflowInteractionLocks(el) {
+  const timeflow = getTimeflowContractStatus();
+  const disabled = Boolean(timeflow.runtime && timeflow.runtime.inProgress);
+  const dynamicActionButtons = Array.from(document.querySelectorAll(
+    "#priceView button, #staffView button"
+  ));
+  [
+    document.getElementById("startCampaignBtn"),
+    document.getElementById("fileComplianceBtn"),
+    document.getElementById("settleArrearsBtn"),
+    document.getElementById("brewAleBtn"),
+    document.getElementById("brewMeadBtn"),
+    document.getElementById("cookStewBtn"),
+    document.getElementById("cleanBtn"),
+    document.getElementById("repairBtn"),
+    document.getElementById("buyGrainBtn"),
+    document.getElementById("buyHopsBtn"),
+    document.getElementById("buyHoneyBtn"),
+    document.getElementById("buyMeatBtn"),
+    document.getElementById("buyVegBtn"),
+    document.getElementById("buyBreadBtn"),
+    document.getElementById("buyWoodBtn"),
+    document.getElementById("hireServerBtn"),
+    document.getElementById("hireCookBtn"),
+    document.getElementById("hireBarkeepBtn"),
+    document.getElementById("hireGuardBtn"),
+    document.getElementById("rotaBalancedBtn"),
+    document.getElementById("rotaDayBtn"),
+    document.getElementById("rotaNightBtn"),
+    document.getElementById("trainBtn"),
+    el.nextDayBtn,
+    el.travelBtn,
+    el.marketingBtn,
+    el.festivalBtn,
+    el.signLocalContractBtn,
+    el.signWholesaleContractBtn,
+    el.stockRunBtn,
+    el.updatePlanDraftBtn,
+    el.commitPlanBtn,
+    ...dynamicActionButtons
+  ].forEach((control) => {
+    if (control) {
+      control.disabled = disabled;
+    }
+  });
+}
+
+function renderSimulationClock(el) {
+  if (!el.clockStatusView) {
+    return;
+  }
+  const clock = getSimulationClockStatus();
+  const timeflow = getTimeflowContractStatus();
+  const tone = clock.isPaused ? "neutral" : "good";
+  const runtime = timeflow.runtime || {};
+  el.clockStatusView.innerHTML = [
+    `<div class="report-line ${tone}">Time: ${clock.label}</div>`,
+    `<div class="report-line neutral">Speed: ${clock.speedLabel}</div>`,
+    `<div class="report-line neutral">Scale: 1 real second = ${clock.speed === 0 ? 0 : clock.speed} in-game minute${clock.speed === 1 ? "" : "s"}.</div>`,
+    `<div class="report-line neutral">Boundary: ${runtime.lastResolutionNote || "No boundary trace yet."}</div>`,
+    `<div class="report-line neutral">Queue: ${runtime.lastQueueSummary || "No queued intents."}</div>`
+  ].join("");
+  const buttons = [
+    [el.pauseSimBtn, 0],
+    [el.playSimBtn, 1],
+    [el.fast2SimBtn, 2],
+    [el.fast4SimBtn, 4]
+  ];
+  buttons.forEach(([button, speed]) => {
+    if (!button) {
+      return;
+    }
+    const isActive = clock.speed === speed;
+    button.classList.toggle("active-speed", isActive);
+  });
+}
+
 function renderTopStats(el) {
   const staffStats = getStaffStats();
   const weekday = DAY_NAMES[(state.day - 1) % 7];
   const locationLabel = state.world && state.world.locationLabel ? state.world.locationLabel : "Arcanum";
   const districtLabel = state.world && state.world.currentDistrictLabel ? state.world.currentDistrictLabel : "-";
   const travelDays = state.world && state.world.travelDaysRemaining ? state.world.travelDaysRemaining : 0;
+  const manager = getManagerPhaseStatus();
+  const clock = getSimulationClockStatus();
+  const timeline = manager.timeline || {};
 
   const tiles = [
     `Day ${state.day} (${weekday})`,
+    `Time ${clock.label}`,
+    `Sim ${clock.speedLabel}`,
+    `Week ${manager.weekIndex} ${manager.phase}`,
+    `WDay ${manager.dayInWeek}/7`,
+    `Season ${timeline.seasonLabel || "Spring"} W${timeline.weekOfSeason || 1}`,
     `Location ${locationLabel}`,
     `District ${districtLabel}`,
     `Travel ${travelDays > 0 ? `${travelDays}d` : "Idle"}`,
@@ -313,7 +521,15 @@ function renderPrices(el) {
 }
 
 function renderStaff(el) {
-  el.staffView.innerHTML = state.staff
+  const manager = getManagerPhaseStatus();
+  const candidates = manager.recruitment && Array.isArray(manager.recruitment.market)
+    ? manager.recruitment.market
+    : [];
+  const shortlist = manager.recruitment && Array.isArray(manager.recruitment.shortlist)
+    ? manager.recruitment.shortlist
+    : [];
+
+  const rosterHtml = state.staff
     .map((person) => {
       const status = person.injuryDays > 0
         ? `Injured ${person.injuryDays}d`
@@ -331,9 +547,39 @@ function renderStaff(el) {
       `;
     })
     .join("");
+  const recruitmentHeader = `
+    <div class="report-line neutral">Recruitment board: ${candidates.length} active, shortlist ${shortlist.length}.</div>
+    <div class="report-line neutral">${manager.recruitment ? manager.recruitment.lastSummary : "Recruitment status unavailable."}</div>
+  `;
+  const recruitmentRows = candidates
+    .slice(0, 6)
+    .map((candidate) => {
+      const shortlistLabel = shortlist.includes(candidate.id) ? "Shortlisted" : "Shortlist";
+      const revealed =
+        Array.isArray(candidate.revealedTraits) && candidate.revealedTraits.length > 0
+          ? candidate.revealedTraits.join(", ")
+          : "no hidden traits revealed";
+      return `
+        <div class="staff-row">
+          <span>
+            ${candidate.name} (${candidate.role}) S:${candidate.visibleService} Q:${candidate.visibleQuality}
+            Pot:${candidate.potentialMin}-${candidate.potentialMax} Wage:${formatCoin(candidate.expectedWage)}
+            ${candidate.daysRemaining}d left | ${revealed}
+          </span>
+          <span>
+            <button data-shortlist-id="${candidate.id}">${shortlistLabel}</button>
+            <button data-scout-id="${candidate.id}">Scout</button>
+            <button data-sign-id="${candidate.id}">Sign</button>
+          </span>
+        </div>
+      `;
+    })
+    .join("");
+  el.staffView.innerHTML = `${rosterHtml}${recruitmentHeader}${recruitmentRows}`;
 }
 
 function renderReport(el) {
+  const manager = getManagerPhaseStatus();
   const topCohort = COHORT_PROFILES[state.lastReport.topCohort] || COHORT_PROFILES.locals;
   const lowCohort = COHORT_PROFILES[state.lastReport.lowCohort] || COHORT_PROFILES.locals;
   const actorTone =
@@ -347,6 +593,11 @@ function renderReport(el) {
     .map(([item, amount]) => `${item}(${amount})`);
 
   const netPrefix = state.lastNet >= 0 ? "+" : "";
+  const activeObjectives = manager.objectives ? manager.objectives.active.length : 0;
+  const completedObjectives = manager.objectives ? manager.objectives.completed.length : 0;
+  const failedObjectives = manager.objectives ? manager.objectives.failed.length : 0;
+  const recruitCount = manager.recruitment ? manager.recruitment.market.length : 0;
+  const shortlistCount = manager.recruitment ? manager.recruitment.shortlist.length : 0;
   const lines = [
     {
       tone: state.lastNet >= 0 ? "good" : "bad",
@@ -437,6 +688,36 @@ function renderReport(el) {
           ? "bad"
           : "neutral",
       text: `Weekly world ledger: ${state.lastReport.weeklyWorldSummary || "No weekly world summary yet."}`
+    },
+    {
+      tone: manager.phase === "execution" && manager.planCommitted ? "good" : "neutral",
+      text:
+        `Planning adherence: phase ${manager.phase}, week ${manager.weekIndex}, day ${manager.dayInWeek}/7, ` +
+        `plan committed ${manager.planCommitted ? "yes" : "no"}.`
+    },
+    {
+      tone: recruitCount >= 3 ? "good" : recruitCount === 0 ? "bad" : "neutral",
+      text:
+        `Recruitment pipeline: ${recruitCount} active candidates, ${shortlistCount} shortlisted. ` +
+        `${manager.recruitment ? manager.recruitment.lastSummary : "No recruitment summary."}`
+    },
+    {
+      tone: failedObjectives > completedObjectives ? "bad" : completedObjectives > 0 ? "good" : "neutral",
+      text:
+        `Objective board: ${activeObjectives} active, ${completedObjectives} completed, ${failedObjectives} failed. ` +
+        `${state.lastReport.objectiveSummary || (manager.objectives ? manager.objectives.lastSummary : "No objective summary.")}`
+    },
+    {
+      tone: "neutral",
+      text:
+        `Seasonal status: ${state.lastReport.seasonSummary || "Season summary unavailable."} ` +
+        `${manager.timeline ? `Transition note: ${manager.timeline.lastTransitionNote}` : ""}`
+    },
+    {
+      tone: "neutral",
+      text:
+        `Timeflow: ${state.lastReport.timeflowSummary || "No timeflow summary yet."} ` +
+        `${state.lastReport.timeflowQueueSummary || ""}`
     }
   ];
 
@@ -579,8 +860,120 @@ function syncCampaignControls(el) {
   if (!el.startLocationSelect || !state.world) {
     return;
   }
-  const nextLocation = state.world.startingLocation;
+  const nextLocation = state.world.activeLocation || state.world.startingLocation;
   if (nextLocation && el.startLocationSelect.value !== nextLocation) {
     el.startLocationSelect.value = nextLocation;
   }
+}
+
+function readWeeklyDraftInput(el) {
+  return {
+    staffingIntent: el.planStaffingSelect ? el.planStaffingSelect.value : "balanced",
+    pricingIntent: el.planPricingSelect ? el.planPricingSelect.value : "balanced",
+    procurementIntent: el.planProcurementSelect ? el.planProcurementSelect.value : "stability",
+    marketingIntent: el.planMarketingSelect ? el.planMarketingSelect.value : "steady",
+    logisticsIntent: el.planLogisticsSelect ? el.planLogisticsSelect.value : "local",
+    riskTolerance: el.planRiskSelect ? el.planRiskSelect.value : "moderate",
+    reserveGoldTarget: el.planReserveInput ? Number(el.planReserveInput.value) : 0,
+    note: el.planNoteInput ? el.planNoteInput.value.trim() : ""
+  };
+}
+
+function syncPlanningControls(el) {
+  const manager = getManagerPhaseStatus();
+  const draft = manager.planDraft || {};
+  const disabled = false;
+
+  if (el.planStaffingSelect && el.planStaffingSelect.value !== draft.staffingIntent) {
+    el.planStaffingSelect.value = draft.staffingIntent || "balanced";
+  }
+  if (el.planPricingSelect && el.planPricingSelect.value !== draft.pricingIntent) {
+    el.planPricingSelect.value = draft.pricingIntent || "balanced";
+  }
+  if (el.planProcurementSelect && el.planProcurementSelect.value !== draft.procurementIntent) {
+    el.planProcurementSelect.value = draft.procurementIntent || "stability";
+  }
+  if (el.planMarketingSelect && el.planMarketingSelect.value !== draft.marketingIntent) {
+    el.planMarketingSelect.value = draft.marketingIntent || "steady";
+  }
+  if (el.planLogisticsSelect && el.planLogisticsSelect.value !== draft.logisticsIntent) {
+    el.planLogisticsSelect.value = draft.logisticsIntent || "local";
+  }
+  if (el.planRiskSelect && el.planRiskSelect.value !== draft.riskTolerance) {
+    el.planRiskSelect.value = draft.riskTolerance || "moderate";
+  }
+  if (el.planReserveInput && Number(el.planReserveInput.value) !== Number(draft.reserveGoldTarget || 0)) {
+    el.planReserveInput.value = `${Math.max(0, Math.round(Number(draft.reserveGoldTarget) || 0))}`;
+  }
+  if (el.planNoteInput && el.planNoteInput.value !== (draft.note || "")) {
+    el.planNoteInput.value = draft.note || "";
+  }
+
+  [
+    el.planStaffingSelect,
+    el.planPricingSelect,
+    el.planProcurementSelect,
+    el.planMarketingSelect,
+    el.planLogisticsSelect,
+    el.planRiskSelect,
+    el.planReserveInput,
+    el.planNoteInput
+  ].forEach((control) => {
+    if (control) {
+      control.disabled = disabled;
+    }
+  });
+}
+
+function renderPlanningStatus(el) {
+  if (!el.planningStatusView) {
+    return;
+  }
+  const manager = getManagerPhaseStatus();
+  const phaseTone =
+    manager.phase === "planning" ? "good" : manager.phase === "execution" ? "neutral" : "bad";
+  const committed = manager.committedPlanSummary || "No plan committed.";
+  const draft = manager.planDraftSummary || "No draft available.";
+  const context = manager.planningContext || null;
+  const contextLine = context
+    ? `${context.summary}`
+    : "World planning context unavailable.";
+  const recommendationLine = context && context.recommendations
+    ? `Recommended: risk ${context.recommendations.riskTolerance}, pricing ${context.recommendations.pricingIntent}, procurement ${context.recommendations.procurementIntent}, marketing ${context.recommendations.marketingIntent}, logistics ${context.recommendations.logisticsIntent}.`
+    : "No world-layer recommendations.";
+  const supplyPlanner = manager.supplyPlanner || null;
+  const supplyLine = supplyPlanner
+    ? `Supply planner: cap ${formatCoin(supplyPlanner.weeklyBudgetCap || 0)}, spent ${formatCoin(supplyPlanner.spent || 0)}. ${supplyPlanner.lastAction || ""}`
+    : "Supply planner data unavailable.";
+  const timing = manager.planningTiming || {};
+  const timingLine =
+    `Timing windows: staffing/pricing/procurement/menu=${timing.staffingIntent || "next_day"}; ` +
+    `marketing/logistics/risk/reserve/supply=${timing.marketingIntent || "next_week"}; note=${timing.note || "instant"}.`;
+  const pendingIntents = Array.isArray(manager.pendingIntents) ? manager.pendingIntents : [];
+  const pendingLine =
+    pendingIntents.length > 0
+      ? `Pending intents (${pendingIntents.length}): ${pendingIntents
+          .slice(0, 3)
+          .map((entry) => `${entry.field}->${entry.effectiveBoundary}`)
+          .join(", ")}${pendingIntents.length > 3 ? "..." : ""}`
+      : "Pending intents: none.";
+  const timeline = manager.timeline || null;
+  const timelineLine = timeline
+    ? `Timeline: Year ${timeline.year}, ${timeline.seasonLabel} week ${timeline.weekOfSeason}, day ${timeline.dayOfSeason}/${28}.`
+    : "Timeline data unavailable.";
+  el.planningStatusView.innerHTML = [
+    `<div class="report-line ${phaseTone}">Phase: ${manager.phase} | Week ${manager.weekIndex} | Day ${manager.dayInWeek}/7</div>`,
+    `<div class="report-line neutral">Draft: ${draft}</div>`,
+    `<div class="report-line neutral">Committed: ${committed}</div>`,
+    `<div class="report-line neutral">World input: ${contextLine}</div>`,
+    `<div class="report-line neutral">${timelineLine}</div>`,
+    `<div class="report-line neutral">${recommendationLine}</div>`,
+    `<div class="report-line neutral">${supplyLine}</div>`,
+    `<div class="report-line neutral">${timingLine}</div>`,
+    `<div class="report-line neutral">${pendingLine}</div>`,
+    `<div class="report-line neutral">${manager.queueSummary || "Queue status unavailable."}</div>`,
+    `<div class="report-line neutral">Transition note: ${manager.transitionReason || "-"}</div>`,
+    `<div class="report-line ${manager.guardNote ? "bad" : "neutral"}">${manager.guardNote || manager.lastWeekSummary}</div>`,
+    `<div class="report-line neutral">Guard recoveries: ${manager.timeflowGuardRecoveries || 0}</div>`
+  ].join("");
 }

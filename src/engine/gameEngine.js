@@ -9,7 +9,9 @@ import {
   PRICE_DEFAULTS,
   ROTA_PRESETS,
   COHORT_PROFILES,
-  PRODUCT_LABELS
+  PRODUCT_LABELS,
+  PATRON_FIRST_NAMES,
+  PATRON_LAST_NAMES
 } from "./config.js";
 import {
   getScenarioFixture,
@@ -49,9 +51,446 @@ import {
 
 const SAVE_SCHEMA_VERSION = 1;
 const DEFAULT_STARTING_LOCATION = "arcanum";
+const MANAGER_WEEK_LENGTH = 7;
+const MINUTES_PER_DAY = 24 * 60;
+const SIMULATION_SPEEDS = [0, 1, 2, 4];
+const TIMEFLOW_CONTRACT_VERSION = 1;
+const TIMEFLOW_UNITS = {
+  minute: "in_game_minute",
+  day: "campaign_day",
+  week: "manager_week"
+};
+const TIMEFLOW_BOUNDARY_ORDER = ["minute_tick", "day_close", "week_close", "reporting_publish"];
+const TIMEFLOW_OWNERSHIP = {
+  clock: "state.clock",
+  managerPhase: "state.manager",
+  dayResolver: "advanceDay",
+  reportingPublisher: "state.lastReport"
+};
+const TIMEFLOW_TRIGGER_PRECEDENCE = ["manual_skip", "midnight_rollover", "week_boundary"];
+const TIMEFLOW_TRIGGER_PRIORITY = Object.freeze({
+  manual_skip: 3,
+  midnight_rollover: 2,
+  week_boundary: 1
+});
+const PLAN_EFFECT_TIMING = Object.freeze({
+  staffingIntent: "next_day",
+  pricingIntent: "next_day",
+  procurementIntent: "next_day",
+  menuFallbackPolicy: "next_day",
+  marketingIntent: "next_week",
+  logisticsIntent: "next_week",
+  riskTolerance: "next_week",
+  reserveGoldTarget: "next_week",
+  supplyBudgetCap: "next_week",
+  note: "instant"
+});
+const PLAN_TIMING_ORDER = ["instant", "next_day", "next_week"];
+const MANAGER_PHASES = {
+  PLANNING: "planning",
+  EXECUTION: "execution",
+  WEEK_CLOSE: "week_close"
+};
+const SEASON_LENGTH = 28;
+const YEAR_LENGTH = SEASON_LENGTH * 4;
+const SEASON_ORDER = [
+  { id: "spring", label: "Spring", start: 1, end: 28 },
+  { id: "summer", label: "Summer", start: 29, end: 56 },
+  { id: "harvest", label: "Harvest", start: 57, end: 84 },
+  { id: "winter", label: "Winter", start: 85, end: 112 }
+];
 
 const random = createRandomController();
 const changeListeners = [];
+
+function createDefaultWeeklyPlan(locationId = DEFAULT_STARTING_LOCATION, weekIndex = 1) {
+  const location = resolveStartingLocation(locationId);
+  return {
+    weekIndex: Math.max(1, Math.round(Number(weekIndex) || 1)),
+    staffingIntent: "balanced",
+    pricingIntent: location.id === "arcanum" ? "premium" : "value",
+    procurementIntent: location.id === "arcanum" ? "quality" : "stability",
+    marketingIntent: location.id === "arcanum" ? "steady" : "growth",
+    logisticsIntent: location.id === "arcanum" ? "local" : "caravan_watch",
+    riskTolerance: location.id === "arcanum" ? "moderate" : "low",
+    reserveGoldTarget: location.id === "arcanum" ? 110 : 90,
+    supplyBudgetCap: location.id === "arcanum" ? 52 : 38,
+    menuFallbackPolicy: location.id === "arcanum" ? "margin_guard" : "substitute_first",
+    note: `Week ${Math.max(1, Math.round(Number(weekIndex) || 1))} planning draft.`
+  };
+}
+
+function isValidManagerTransition(fromPhase, toPhase) {
+  const from = typeof fromPhase === "string" ? fromPhase : MANAGER_PHASES.PLANNING;
+  const to = typeof toPhase === "string" ? toPhase : MANAGER_PHASES.PLANNING;
+  const graph = {
+    [MANAGER_PHASES.PLANNING]: [MANAGER_PHASES.EXECUTION],
+    [MANAGER_PHASES.EXECUTION]: [MANAGER_PHASES.WEEK_CLOSE],
+    [MANAGER_PHASES.WEEK_CLOSE]: [MANAGER_PHASES.PLANNING]
+  };
+  return Array.isArray(graph[from]) && graph[from].includes(to);
+}
+
+function normalizeRecruitCandidateEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const role = typeof entry.role === "string" ? entry.role : "server";
+  return {
+    id: typeof entry.id === "string" ? entry.id : "",
+    name: typeof entry.name === "string" ? entry.name : "Unnamed Candidate",
+    role,
+    trueService: Math.max(4, Math.min(30, Math.round(Number(entry.trueService) || 10))),
+    trueQuality: Math.max(2, Math.min(25, Math.round(Number(entry.trueQuality) || 8))),
+    potentialMin: Math.max(6, Math.min(35, Math.round(Number(entry.potentialMin) || 12))),
+    potentialMax: Math.max(8, Math.min(40, Math.round(Number(entry.potentialMax) || 18))),
+    expectedWage: Math.max(6, Math.min(30, Math.round(Number(entry.expectedWage) || 10))),
+    visibleService: Math.max(1, Math.min(30, Math.round(Number(entry.visibleService) || 10))),
+    visibleQuality: Math.max(1, Math.min(25, Math.round(Number(entry.visibleQuality) || 8))),
+    confidence: Math.max(0, Math.min(100, Math.round(Number(entry.confidence) || 35))),
+    daysRemaining: Math.max(0, Math.min(14, Math.round(Number(entry.daysRemaining) || 6))),
+    interest: Math.max(0, Math.min(100, Math.round(Number(entry.interest) || 55))),
+    competingPressure: Math.max(0, Math.min(100, Math.round(Number(entry.competingPressure) || 40))),
+    visibleTraits: Array.isArray(entry.visibleTraits) ? entry.visibleTraits.map((value) => `${value}`).slice(0, 4) : [],
+    hiddenTraits: Array.isArray(entry.hiddenTraits) ? entry.hiddenTraits.map((value) => `${value}`).slice(0, 4) : [],
+    revealedTraits: Array.isArray(entry.revealedTraits) ? entry.revealedTraits.map((value) => `${value}`).slice(0, 4) : []
+  };
+}
+
+function normalizeObjectiveEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  return {
+    id: typeof entry.id === "string" ? entry.id : "",
+    issuer: typeof entry.issuer === "string" ? entry.issuer : "crown_office",
+    type: typeof entry.type === "string" ? entry.type : "merchant_margin",
+    label: typeof entry.label === "string" ? entry.label : "Untitled objective",
+    description: typeof entry.description === "string" ? entry.description : "",
+    remainingWeeks: Math.max(0, Math.min(12, Math.round(Number(entry.remainingWeeks) || 0))),
+    goalValue: Math.max(1, Math.round(Number(entry.goalValue) || 1)),
+    progressValue: Math.max(0, Math.round(Number(entry.progressValue) || 0)),
+    metric: typeof entry.metric === "string" ? entry.metric : "count_days",
+    rewardGold: Math.max(0, Math.round(Number(entry.rewardGold) || 0)),
+    rewardReputation: Math.max(0, Math.round(Number(entry.rewardReputation) || 0)),
+    penaltyGold: Math.max(0, Math.round(Number(entry.penaltyGold) || 0)),
+    penaltyReputation: Math.max(0, Math.round(Number(entry.penaltyReputation) || 0)),
+    status: typeof entry.status === "string" ? entry.status : "active",
+    progressNote: typeof entry.progressNote === "string" ? entry.progressNote : "",
+    originWeek: Math.max(1, Math.round(Number(entry.originWeek) || 1)),
+    payload:
+      entry.payload && typeof entry.payload === "object"
+        ? { ...entry.payload }
+        : {}
+  };
+}
+
+function createSimulationClockState(existing = null) {
+  const input = existing && typeof existing === "object" ? existing : {};
+  const speedRaw = Math.round(Number(input.speed) || 0);
+  const speed = SIMULATION_SPEEDS.includes(speedRaw) ? speedRaw : 0;
+  return {
+    minuteOfDay: Math.max(0, Math.min(MINUTES_PER_DAY - 1, Math.round(Number(input.minuteOfDay) || 480))),
+    speed
+  };
+}
+
+function createTimeflowRuntimeState(existing = null) {
+  const input = existing && typeof existing === "object" ? existing : {};
+  const intentQueue = Array.isArray(input.intentQueue)
+    ? input.intentQueue
+        .map((entry, index) => {
+          if (!entry || typeof entry !== "object") {
+            return null;
+          }
+          const timing =
+            typeof entry.timing === "string" && PLAN_TIMING_ORDER.includes(entry.timing)
+              ? entry.timing
+              : "next_day";
+          const fallbackIdBase =
+            `legacy-${Math.max(1, Math.round(Number(entry.createdAtDay) || 1))}-` +
+            `${Math.max(0, Math.min(MINUTES_PER_DAY - 1, Math.round(Number(entry.createdAtMinute) || 0)))}-` +
+            `${typeof entry.field === "string" ? entry.field : "field"}`;
+          return {
+            id: typeof entry.id === "string" ? entry.id : fallbackIdBase,
+            source: typeof entry.source === "string" ? entry.source : "planning_board",
+            field: typeof entry.field === "string" ? entry.field : "",
+            value: entry.value,
+            timing,
+            effectiveBoundary: timing === "next_week" ? "week_start" : "day_start",
+            priority: timing === "next_week" ? 1 : 2,
+            createdAtDay: Math.max(1, Math.round(Number(entry.createdAtDay) || 1)),
+            createdAtMinute: Math.max(0, Math.min(MINUTES_PER_DAY - 1, Math.round(Number(entry.createdAtMinute) || 0))),
+            createdSeq: Math.max(0, Math.round(Number(entry.createdSeq) || index)),
+            applied: Boolean(entry.applied)
+          };
+        })
+        .filter((entry) => entry && entry.field.length > 0)
+    : [];
+  const inferredNextIntentSeq =
+    intentQueue.length > 0
+      ? intentQueue.reduce((max, entry) => Math.max(max, Math.max(0, Math.round(Number(entry.createdSeq) || 0))), 0) + 1
+      : 0;
+  const lastTrigger =
+    typeof input.lastTrigger === "string" && TIMEFLOW_TRIGGER_PRECEDENCE.includes(input.lastTrigger)
+      ? input.lastTrigger
+      : "manual_skip";
+  return {
+    activeTrigger:
+      typeof input.activeTrigger === "string" && TIMEFLOW_TRIGGER_PRECEDENCE.includes(input.activeTrigger)
+        ? input.activeTrigger
+        : null,
+    inProgress: Boolean(input.inProgress),
+    lastTrigger,
+    lastBoundaryOrder: Array.isArray(input.lastBoundaryOrder)
+      ? input.lastBoundaryOrder
+          .map((entry) => `${entry}`)
+          .filter((entry) => TIMEFLOW_BOUNDARY_ORDER.includes(entry))
+      : [],
+    lastResolvedDay: Math.max(1, Math.round(Number(input.lastResolvedDay) || 1)),
+    lastMinuteOfDay: Math.max(0, Math.min(MINUTES_PER_DAY - 1, Math.round(Number(input.lastMinuteOfDay) || 480))),
+    lastBoundaryKey: typeof input.lastBoundaryKey === "string" ? input.lastBoundaryKey : "",
+    lastBoundarySucceeded: input.lastBoundarySucceeded !== false,
+    lastResolutionNote:
+      typeof input.lastResolutionNote === "string"
+        ? input.lastResolutionNote
+        : "No timeflow boundary resolution recorded yet.",
+    intentQueue,
+    lastQueueSummary:
+      typeof input.lastQueueSummary === "string"
+        ? input.lastQueueSummary
+        : "No queued planning intents.",
+    cadence: input.cadence && typeof input.cadence === "object"
+      ? {
+          minuteLocks:
+            input.cadence.minuteLocks && typeof input.cadence.minuteLocks === "object"
+              ? { ...input.cadence.minuteLocks }
+              : {},
+          dayLocks:
+            input.cadence.dayLocks && typeof input.cadence.dayLocks === "object"
+              ? { ...input.cadence.dayLocks }
+              : {},
+          weekLocks:
+            input.cadence.weekLocks && typeof input.cadence.weekLocks === "object"
+              ? { ...input.cadence.weekLocks }
+              : {}
+        }
+      : {
+          minuteLocks: {},
+          dayLocks: {},
+          weekLocks: {}
+        },
+    boundaries:
+      input.boundaries && typeof input.boundaries === "object"
+        ? {
+            lastWeekCloseAtDay: Math.max(0, Math.round(Number(input.boundaries.lastWeekCloseAtDay) || 0)),
+            lastWeekCloseWeek: Math.max(0, Math.round(Number(input.boundaries.lastWeekCloseWeek) || 0))
+          }
+        : {
+            lastWeekCloseAtDay: 0,
+            lastWeekCloseWeek: 0
+          },
+    diagnostics:
+      input.diagnostics && typeof input.diagnostics === "object"
+        ? {
+            guardRecoveries: Math.max(0, Math.round(Number(input.diagnostics.guardRecoveries) || 0)),
+            lastParityStatus:
+              typeof input.diagnostics.lastParityStatus === "string"
+                ? input.diagnostics.lastParityStatus
+                : "unverified"
+          }
+        : {
+            guardRecoveries: 0,
+            lastParityStatus: "unverified"
+          },
+    nextIntentSeq: Math.max(0, Math.round(Number(input.nextIntentSeq) || inferredNextIntentSeq))
+  };
+}
+
+function resolveSeasonTimeline(dayNumber) {
+  const day = Math.max(1, Math.round(Number(dayNumber) || 1));
+  const year = Math.floor((day - 1) / YEAR_LENGTH) + 1;
+  const dayOfYear = ((day - 1) % YEAR_LENGTH) + 1;
+  const season = SEASON_ORDER.find((entry) => dayOfYear >= entry.start && dayOfYear <= entry.end) || SEASON_ORDER[0];
+  const dayOfSeason = dayOfYear - season.start + 1;
+  const weekOfSeason = Math.floor((dayOfSeason - 1) / 7) + 1;
+  return {
+    day,
+    year,
+    dayOfYear,
+    seasonId: season.id,
+    seasonLabel: season.label,
+    dayOfSeason,
+    weekOfSeason
+  };
+}
+
+function normalizeManagerState(existing = null, currentDay = 1, activeLocationId = DEFAULT_STARTING_LOCATION) {
+  const input = existing && typeof existing === "object" ? existing : {};
+  const inferredWeek = Math.max(1, Math.floor((Math.max(1, Math.round(Number(currentDay) || 1)) - 1) / MANAGER_WEEK_LENGTH) + 1);
+  const weekIndex = Math.max(1, Math.round(Number(input.weekIndex) || inferredWeek));
+  const inferredDayInWeek = ((Math.max(1, Math.round(Number(currentDay) || 1)) - 1) % MANAGER_WEEK_LENGTH) + 1;
+  const phase =
+    input.phase === MANAGER_PHASES.PLANNING ||
+    input.phase === MANAGER_PHASES.EXECUTION ||
+    input.phase === MANAGER_PHASES.WEEK_CLOSE
+      ? input.phase
+      : MANAGER_PHASES.PLANNING;
+  const planDraft = createDefaultWeeklyPlan(
+    activeLocationId,
+    weekIndex
+  );
+  if (input.planDraft && typeof input.planDraft === "object") {
+    Object.assign(planDraft, input.planDraft);
+    planDraft.weekIndex = weekIndex;
+  }
+  const committedPlan = input.committedPlan && typeof input.committedPlan === "object"
+    ? { ...input.committedPlan, weekIndex }
+    : null;
+  const dayInWeek = Math.max(1, Math.min(MANAGER_WEEK_LENGTH, Math.round(Number(input.dayInWeek) || inferredDayInWeek)));
+  let planCommitted = Boolean(input.planCommitted);
+  let normalizedPhase = phase;
+  let guardNote = typeof input.guardNote === "string" ? input.guardNote : "";
+
+  if (normalizedPhase === MANAGER_PHASES.EXECUTION && !planCommitted) {
+    normalizedPhase = MANAGER_PHASES.PLANNING;
+    guardNote = "Recovered from invalid execution phase without committed plan.";
+  }
+  if (normalizedPhase === MANAGER_PHASES.PLANNING && !committedPlan) {
+    planCommitted = false;
+  }
+  const recruitmentInput = input.recruitment && typeof input.recruitment === "object" ? input.recruitment : {};
+  const market = Array.isArray(recruitmentInput.market)
+    ? recruitmentInput.market
+        .map((entry) => normalizeRecruitCandidateEntry(entry))
+        .filter(Boolean)
+        .slice(0, 16)
+    : [];
+  const shortlist = Array.isArray(recruitmentInput.shortlist)
+    ? recruitmentInput.shortlist
+        .map((entry) => `${entry}`)
+        .filter((candidateId, index, arr) => candidateId.length > 0 && arr.indexOf(candidateId) === index)
+        .slice(0, 16)
+    : [];
+  const objectivesInput = input.objectives && typeof input.objectives === "object" ? input.objectives : {};
+  const activeObjectives = Array.isArray(objectivesInput.active)
+    ? objectivesInput.active
+        .map((entry) => normalizeObjectiveEntry(entry))
+        .filter(Boolean)
+        .slice(0, 12)
+    : [];
+  const completedObjectives = Array.isArray(objectivesInput.completed)
+    ? objectivesInput.completed
+        .map((entry) => normalizeObjectiveEntry(entry))
+        .filter(Boolean)
+        .slice(0, 24)
+    : [];
+  const failedObjectives = Array.isArray(objectivesInput.failed)
+    ? objectivesInput.failed
+        .map((entry) => normalizeObjectiveEntry(entry))
+        .filter(Boolean)
+        .slice(0, 24)
+    : [];
+  const resolvedTimeline = resolveSeasonTimeline(currentDay);
+  const timelineInput = input.timeline && typeof input.timeline === "object" ? input.timeline : {};
+
+  return {
+    phase: normalizedPhase,
+    weekIndex,
+    dayInWeek,
+    planCommitted,
+    planDraft,
+    committedPlan,
+    lastTransitionDay: Math.max(1, Math.round(Number(input.lastTransitionDay) || Math.max(1, Math.round(Number(currentDay) || 1)))),
+    transitionReason: typeof input.transitionReason === "string" ? input.transitionReason : "Planning initialized.",
+    guardNote,
+    lastWeekSummary: typeof input.lastWeekSummary === "string" ? input.lastWeekSummary : "No weekly close summary yet.",
+    supplyPlanner:
+      input.supplyPlanner && typeof input.supplyPlanner === "object"
+        ? {
+            weeklyBudgetCap: Math.max(0, Math.round(Number(input.supplyPlanner.weeklyBudgetCap) || Math.round(Number(planDraft.supplyBudgetCap) || 40))),
+            spent: Math.max(0, Math.round(Number(input.supplyPlanner.spent) || 0)),
+            stockTargets:
+              input.supplyPlanner.stockTargets && typeof input.supplyPlanner.stockTargets === "object"
+                ? { ...input.supplyPlanner.stockTargets }
+                : {},
+            lastAction:
+              typeof input.supplyPlanner.lastAction === "string"
+                ? input.supplyPlanner.lastAction
+                : "Supply planner idle."
+          }
+        : {
+            weeklyBudgetCap: Math.max(0, Math.round(Number(planDraft.supplyBudgetCap) || 40)),
+            spent: 0,
+            stockTargets: {},
+            lastAction: "Supply planner idle."
+          },
+    recruitment: {
+      market,
+      shortlist,
+      lastRefreshWeek: Math.max(0, Math.round(Number(recruitmentInput.lastRefreshWeek) || 0)),
+      lastSummary:
+        typeof recruitmentInput.lastSummary === "string"
+          ? recruitmentInput.lastSummary
+          : "Recruitment market not refreshed yet."
+    },
+    objectives: {
+      active: activeObjectives,
+      completed: completedObjectives,
+      failed: failedObjectives,
+      lastSummary:
+        typeof objectivesInput.lastSummary === "string"
+          ? objectivesInput.lastSummary
+          : "Objective board not generated yet."
+    },
+    timeline: {
+      year: Math.max(1, Math.round(Number(timelineInput.year) || resolvedTimeline.year)),
+      seasonId: typeof timelineInput.seasonId === "string" ? timelineInput.seasonId : resolvedTimeline.seasonId,
+      seasonLabel: typeof timelineInput.seasonLabel === "string" ? timelineInput.seasonLabel : resolvedTimeline.seasonLabel,
+      dayOfSeason: Math.max(1, Math.min(SEASON_LENGTH, Math.round(Number(timelineInput.dayOfSeason) || resolvedTimeline.dayOfSeason))),
+      weekOfSeason: Math.max(1, Math.min(4, Math.round(Number(timelineInput.weekOfSeason) || resolvedTimeline.weekOfSeason))),
+      dayOfYear: Math.max(1, Math.min(YEAR_LENGTH, Math.round(Number(timelineInput.dayOfYear) || resolvedTimeline.dayOfYear))),
+      lastTransitionDay: Math.max(1, Math.round(Number(timelineInput.lastTransitionDay) || resolvedTimeline.day)),
+      lastTransitionNote:
+        typeof timelineInput.lastTransitionNote === "string"
+          ? timelineInput.lastTransitionNote
+          : `Season baseline: ${resolvedTimeline.seasonLabel}.`
+    },
+    planningContext:
+      input.planningContext && typeof input.planningContext === "object"
+        ? {
+            sourceDay: Math.max(1, Math.round(Number(input.planningContext.sourceDay) || Math.max(1, Math.round(Number(currentDay) || 1)))),
+            contractVersion: Math.max(1, Math.round(Number(input.planningContext.contractVersion) || 1)),
+            locationId: typeof input.planningContext.locationId === "string" ? input.planningContext.locationId : activeLocationId,
+            compliance: Math.max(0, Math.min(100, Math.round(Number(input.planningContext.compliance) || 0))),
+            supplierVolatility: Math.max(0, Math.min(100, Math.round(Number(input.planningContext.supplierVolatility) || 0))),
+            rivalPressurePct: Math.max(0, Math.min(100, Math.round(Number(input.planningContext.rivalPressurePct) || 0))),
+            eventRiskTag:
+              typeof input.planningContext.eventRiskTag === "string"
+                ? input.planningContext.eventRiskTag
+                : "No immediate calendar risk signal.",
+            recommendations:
+              input.planningContext.recommendations && typeof input.planningContext.recommendations === "object"
+                ? { ...input.planningContext.recommendations }
+                : {},
+            summary:
+              typeof input.planningContext.summary === "string"
+                ? input.planningContext.summary
+                : "Planning context pending world-layer sync."
+          }
+        : {
+            sourceDay: Math.max(1, Math.round(Number(currentDay) || 1)),
+            contractVersion: 1,
+            locationId: activeLocationId,
+            compliance: 0,
+            supplierVolatility: 0,
+            rivalPressurePct: 0,
+            eventRiskTag: "Planning context pending world-layer sync.",
+            recommendations: {},
+            summary: "Planning context pending world-layer sync."
+          }
+  };
+}
 
 function resolveStartingLocation(locationId) {
   if (typeof locationId === "string" && STARTING_LOCATION_PROFILES[locationId]) {
@@ -403,7 +842,7 @@ function createDistrictRivalState(district, existingDistrictState = null) {
   const taverns = district.rivalTaverns.map((rival) => {
     const source = byId[rival.id] || {};
     const basePressure = clamp(Number(rival.pressure) || 0.08, 0.03, 0.6);
-    const defaultPressure = clamp(basePressure + randInt(-2, 2) / 200, 0.02, 0.62);
+    const defaultPressure = clamp(basePressure, 0.02, 0.62);
     return {
       id: rival.id,
       name: rival.name,
@@ -1010,6 +1449,599 @@ function getWorldLayerStatus(options = null) {
   };
 }
 
+function getManagerState() {
+  const activeLocationId =
+    state.world && typeof state.world === "object"
+      ? state.world.activeLocation || state.world.startingLocation || DEFAULT_STARTING_LOCATION
+      : DEFAULT_STARTING_LOCATION;
+  state.manager = normalizeManagerState(state.manager, state.day, activeLocationId);
+  return state.manager;
+}
+
+function refreshSeasonTimeline() {
+  const manager = getManagerState();
+  const previous = manager.timeline || resolveSeasonTimeline(state.day);
+  const next = resolveSeasonTimeline(state.day);
+  const seasonChanged = previous.seasonId !== next.seasonId || previous.year !== next.year;
+  manager.timeline = {
+    year: next.year,
+    seasonId: next.seasonId,
+    seasonLabel: next.seasonLabel,
+    dayOfSeason: next.dayOfSeason,
+    weekOfSeason: next.weekOfSeason,
+    dayOfYear: next.dayOfYear,
+    lastTransitionDay: seasonChanged ? state.day : previous.lastTransitionDay,
+    lastTransitionNote: seasonChanged
+      ? `Season shifted to ${next.seasonLabel} in Year ${next.year} (Day ${state.day}).`
+      : previous.lastTransitionNote
+  };
+  if (seasonChanged) {
+    if (next.seasonId === "winter") {
+      setWorldEffect("supply_reliability", 2, 0.9);
+      setWorldEffect("demand", 2, 0.94);
+    } else if (next.seasonId === "harvest") {
+      setWorldEffect("supply_reliability", 2, 1.08);
+      setWorldEffect("demand", 2, 1.06);
+    } else if (next.seasonId === "summer") {
+      setWorldEffect("demand", 2, 1.04);
+    }
+  }
+  return manager.timeline;
+}
+
+function derivePlanningGuidanceFromWorldLayer(worldLayer = null) {
+  const layer = worldLayer && typeof worldLayer === "object" ? worldLayer : getWorldLayerStatus({ outlookDays: 7 });
+  const timeline = getManagerState().timeline || resolveSeasonTimeline(layer.day);
+  const handoff = layer.handoffContract && typeof layer.handoffContract === "object" ? layer.handoffContract : null;
+  const taxes = handoff && handoff.taxesCompliance ? handoff.taxesCompliance : {};
+  const suppliers = handoff && handoff.supplierLogistics ? handoff.supplierLogistics : {};
+  const rivals = handoff && handoff.rivalPressure ? handoff.rivalPressure : {};
+  const location = handoff && handoff.locationProfile ? handoff.locationProfile : {};
+  const outlook = handoff && handoff.eventCalendarOutlook ? handoff.eventCalendarOutlook : {};
+  const highlights = Array.isArray(outlook.highlights) ? outlook.highlights : [];
+  const eventRiskTag =
+    highlights.find((line) => typeof line === "string" && /levy|audit|flood|strike|storm/i.test(line)) ||
+    highlights[0] ||
+    "No immediate calendar risk signal.";
+  const compliance = Math.max(0, Math.min(100, Math.round(Number(taxes.complianceScore) || 0)));
+  const supplierVolatility = Math.max(0, Math.min(100, Math.round(Number(suppliers.volatility) || 0)));
+  const rivalPressurePct = Math.max(
+    0,
+    Math.min(100, Math.round((Number(rivals.demandPressure) || 0) * 100))
+  );
+  const recommendedRisk =
+    compliance < 52 ? "low" : supplierVolatility >= 66 ? "moderate" : "high";
+  const recommendedPricing =
+    rivalPressurePct >= 20 ? "value" : location.id === "arcanum" ? "premium" : "balanced";
+  const recommendedProcurement =
+    supplierVolatility >= 62 ? "stability" : location.id === "arcanum" ? "quality" : "cost_control";
+  const recommendedMarketing =
+    Number(location.demandMult) < 1 ? "growth" : compliance < 50 ? "steady" : "campaign";
+  const recommendedLogistics =
+    /Caravan/i.test(eventRiskTag) || supplierVolatility >= 58
+      ? "caravan_watch"
+      : location.id === "meadowbrook"
+        ? "city_push"
+        : "local";
+  const seasonAdjusted = { ...{
+    riskTolerance: recommendedRisk,
+    pricingIntent: recommendedPricing,
+    procurementIntent: recommendedProcurement,
+    marketingIntent: recommendedMarketing,
+    logisticsIntent: recommendedLogistics
+  } };
+  if (timeline.seasonId === "winter") {
+    seasonAdjusted.procurementIntent = "stability";
+    seasonAdjusted.marketingIntent = "steady";
+    seasonAdjusted.riskTolerance = seasonAdjusted.riskTolerance === "high" ? "moderate" : seasonAdjusted.riskTolerance;
+  } else if (timeline.seasonId === "harvest") {
+    seasonAdjusted.marketingIntent = "campaign";
+    seasonAdjusted.logisticsIntent = "caravan_watch";
+  }
+
+  return {
+    sourceDay: layer.day,
+    contractVersion: Math.max(1, Math.round(Number(layer.contractVersion) || 1)),
+    locationId: typeof location.id === "string" ? location.id : DEFAULT_STARTING_LOCATION,
+    compliance,
+    supplierVolatility,
+    rivalPressurePct,
+    eventRiskTag,
+    recommendations: {
+      ...seasonAdjusted
+    },
+    summary:
+      `World feed D${layer.day}: compliance ${compliance}, supplier vol ${supplierVolatility}, ` +
+      `rival pressure ${rivalPressurePct}%, season ${timeline.seasonLabel}, signal "${eventRiskTag}".`
+  };
+}
+
+function refreshPlanningContext(options = {}) {
+  let manager = getManagerState();
+  const guidance = derivePlanningGuidanceFromWorldLayer(getWorldLayerStatus({ outlookDays: 7 }));
+  manager = getManagerState();
+  manager.planningContext = guidance;
+  if (options.overwriteDraft) {
+    manager.planDraft.riskTolerance = guidance.recommendations.riskTolerance;
+    manager.planDraft.pricingIntent = guidance.recommendations.pricingIntent;
+    manager.planDraft.procurementIntent = guidance.recommendations.procurementIntent;
+    manager.planDraft.marketingIntent = guidance.recommendations.marketingIntent;
+    manager.planDraft.logisticsIntent = guidance.recommendations.logisticsIntent;
+    manager.planDraft.note = `Week ${manager.weekIndex} focus: ${guidance.summary}`;
+  }
+  return guidance;
+}
+
+function getTimeflowTriggerPriority(trigger) {
+  return TIMEFLOW_TRIGGER_PRIORITY[trigger] || 0;
+}
+
+function getPlanningTimingMatrix() {
+  return Object.fromEntries(
+    Object.entries(PLAN_EFFECT_TIMING).map(([field, timing]) => [field, timing])
+  );
+}
+
+function normalizePlanningFieldValue(field, value) {
+  if (field === "reserveGoldTarget" || field === "supplyBudgetCap") {
+    return Math.max(0, Math.round(Number(value) || 0));
+  }
+  return `${value}`;
+}
+
+function applyPlanningFieldToPlans(field, value) {
+  const manager = getManagerState();
+  const normalizedValue = normalizePlanningFieldValue(field, value);
+  manager.planDraft[field] = normalizedValue;
+  manager.planDraft.weekIndex = manager.weekIndex;
+  if (manager.planCommitted && manager.committedPlan) {
+    manager.committedPlan[field] = normalizedValue;
+    manager.committedPlan.weekIndex = manager.weekIndex;
+    if (field === "supplyBudgetCap") {
+      manager.supplyPlanner.weeklyBudgetCap = Math.max(0, Math.round(Number(normalizedValue) || 0));
+    }
+  }
+}
+
+function queuePlanningIntent(field, value, timing, source = "planning_board") {
+  state.timeflow = createTimeflowRuntimeState(state.timeflow);
+  const queue = state.timeflow.intentQueue;
+  const normalizedTiming =
+    typeof timing === "string" && PLAN_TIMING_ORDER.includes(timing)
+      ? timing
+      : PLAN_EFFECT_TIMING[field] || "next_day";
+  const clock = createSimulationClockState(state.clock);
+  const entry = {
+    id: random.randomId(10),
+    source,
+    field,
+    value: normalizePlanningFieldValue(field, value),
+    timing: normalizedTiming,
+    effectiveBoundary: normalizedTiming === "next_week" ? "week_start" : "day_start",
+    priority: normalizedTiming === "next_week" ? 1 : 2,
+    createdAtDay: state.day,
+    createdAtMinute: clock.minuteOfDay,
+    createdSeq: state.timeflow.nextIntentSeq,
+    applied: false
+  };
+  state.timeflow.nextIntentSeq += 1;
+  queue.push(entry);
+  queue.sort((a, b) =>
+    b.priority - a.priority ||
+    a.createdAtDay - b.createdAtDay ||
+    a.createdAtMinute - b.createdAtMinute ||
+    a.createdSeq - b.createdSeq ||
+    a.id.localeCompare(b.id)
+  );
+  state.timeflow.lastQueueSummary = `Queued ${queue.length} planning intent${queue.length === 1 ? "" : "s"}.`;
+  return entry;
+}
+
+function flushPlanningIntentQueue(boundary = "day_start") {
+  state.timeflow = createTimeflowRuntimeState(state.timeflow);
+  const queue = state.timeflow.intentQueue;
+  if (queue.length === 0) {
+    state.timeflow.lastQueueSummary = "No queued planning intents.";
+    return { applied: 0, rejected: 0, pending: 0 };
+  }
+  const nextQueue = [];
+  let applied = 0;
+  let rejected = 0;
+  const appliedFields = [];
+  queue.forEach((entry) => {
+    if (!entry || !entry.field || !PLAN_EFFECT_TIMING[entry.field]) {
+      rejected += 1;
+      return;
+    }
+    if (entry.effectiveBoundary !== boundary) {
+      nextQueue.push(entry);
+      return;
+    }
+    applyPlanningFieldToPlans(entry.field, entry.value);
+    applied += 1;
+    appliedFields.push(entry.field);
+  });
+  state.timeflow.intentQueue = nextQueue;
+  if (applied > 0) {
+    logLine(
+      `Applied ${applied} queued planning intent${applied === 1 ? "" : "s"} at ${boundary}: ${appliedFields.join(", ")}.`,
+      "neutral"
+    );
+  }
+  if (rejected > 0) {
+    logLine(`Rejected ${rejected} invalid queued planning intent${rejected === 1 ? "" : "s"}.`, "bad");
+  }
+  const pending = nextQueue.length;
+  state.timeflow.lastQueueSummary =
+    pending > 0
+      ? `${pending} queued planning intent${pending === 1 ? "" : "s"} pending (${boundary} pass complete).`
+      : `Queue clear after ${boundary}.`;
+  return { applied, rejected, pending };
+}
+
+function requireActionWindow(actionId, options = null) {
+  state.timeflow = createTimeflowRuntimeState(state.timeflow);
+  const allowDuringBoundary = Boolean(options && options.allowDuringBoundary);
+  if (allowDuringBoundary) {
+    return { ok: true };
+  }
+  if (state.timeflow.inProgress) {
+    state.timeflow.diagnostics.guardRecoveries += 1;
+    return {
+      ok: false,
+      error: `${actionId} blocked during boundary resolution.`
+    };
+  }
+  return { ok: true };
+}
+
+function enforceActionCadence(actionId, rules = {}) {
+  state.timeflow = createTimeflowRuntimeState(state.timeflow);
+  const timeflow = state.timeflow;
+  if (timeflow.inProgress) {
+    timeflow.diagnostics.guardRecoveries += 1;
+    return { ok: false, error: "Action blocked during boundary resolution." };
+  }
+  const manager = getManagerState();
+  const minuteStamp = `D${state.day}:M${Math.max(0, Math.round(Number(state.clock && state.clock.minuteOfDay) || 0))}`;
+  const minuteLocks = timeflow.cadence.minuteLocks;
+  const dayLocks = timeflow.cadence.dayLocks;
+  const weekLocks = timeflow.cadence.weekLocks;
+  if (rules.perMinute && minuteLocks[actionId] === minuteStamp) {
+    timeflow.diagnostics.guardRecoveries += 1;
+    return { ok: false, error: `${actionId} already used this in-game minute.` };
+  }
+  if (rules.perDay && dayLocks[actionId] === state.day) {
+    timeflow.diagnostics.guardRecoveries += 1;
+    return { ok: false, error: `${actionId} already used today.` };
+  }
+  if (rules.perWeek && weekLocks[actionId] === manager.weekIndex) {
+    timeflow.diagnostics.guardRecoveries += 1;
+    return { ok: false, error: `${actionId} already used this week.` };
+  }
+  if (rules.perMinute) {
+    minuteLocks[actionId] = minuteStamp;
+  }
+  if (rules.perDay) {
+    dayLocks[actionId] = state.day;
+  }
+  if (rules.perWeek) {
+    weekLocks[actionId] = manager.weekIndex;
+  }
+  return { ok: true };
+}
+
+function beginTimeflowResolution(trigger = "manual_skip") {
+  normalizeWorldState();
+  state.timeflow = createTimeflowRuntimeState(state.timeflow);
+  const timeflow = state.timeflow;
+  const nextTrigger =
+    typeof trigger === "string" && TIMEFLOW_TRIGGER_PRECEDENCE.includes(trigger)
+      ? trigger
+      : "manual_skip";
+  const activeMinute = Math.max(0, Math.round(Number(state.clock && state.clock.minuteOfDay) || 0));
+  const boundaryKey = `${nextTrigger}|D${state.day}|M${activeMinute}`;
+  if (!timeflow.inProgress && timeflow.lastBoundarySucceeded && timeflow.lastBoundaryKey === boundaryKey) {
+    timeflow.diagnostics.guardRecoveries += 1;
+    return {
+      ok: false,
+      error: `Duplicate boundary resolution blocked for ${boundaryKey}.`,
+      activeTrigger: timeflow.activeTrigger
+    };
+  }
+  if (timeflow.inProgress) {
+    const activePriority = getTimeflowTriggerPriority(timeflow.activeTrigger || "manual_skip");
+    const incomingPriority = getTimeflowTriggerPriority(nextTrigger);
+    timeflow.diagnostics.guardRecoveries += 1;
+    return {
+      ok: false,
+      error:
+        incomingPriority > activePriority
+          ? `Blocked trigger "${nextTrigger}" while "${timeflow.activeTrigger}" is resolving.`
+          : `Skipped lower-priority trigger "${nextTrigger}" while "${timeflow.activeTrigger}" is resolving.`,
+      activeTrigger: timeflow.activeTrigger
+    };
+  }
+  timeflow.inProgress = true;
+  timeflow.activeTrigger = nextTrigger;
+  return { ok: true, trigger: nextTrigger, boundaryKey };
+}
+
+function endTimeflowResolution(data = {}) {
+  state.timeflow = createTimeflowRuntimeState(state.timeflow);
+  const timeflow = state.timeflow;
+  const trigger =
+    typeof data.trigger === "string" && TIMEFLOW_TRIGGER_PRECEDENCE.includes(data.trigger)
+      ? data.trigger
+      : timeflow.activeTrigger || timeflow.lastTrigger || "manual_skip";
+  const boundaryKey = typeof data.boundaryKey === "string" ? data.boundaryKey : "";
+  const success = data.success !== false;
+  timeflow.inProgress = false;
+  timeflow.activeTrigger = null;
+  timeflow.lastTrigger = trigger;
+  timeflow.lastBoundarySucceeded = success;
+  if (boundaryKey.length > 0 && success) {
+    timeflow.lastBoundaryKey = boundaryKey;
+  }
+  timeflow.lastBoundaryOrder = Array.isArray(data.boundaryOrder)
+    ? data.boundaryOrder
+        .map((entry) => `${entry}`)
+        .filter((entry) => TIMEFLOW_BOUNDARY_ORDER.includes(entry))
+    : [];
+  timeflow.lastResolvedDay = Math.max(1, Math.round(Number(data.day) || state.day));
+  const minuteOfDay = state.clock ? state.clock.minuteOfDay : 0;
+  timeflow.lastMinuteOfDay = Math.max(0, Math.min(MINUTES_PER_DAY - 1, Math.round(Number(minuteOfDay) || 0)));
+  const boundaryLine =
+    timeflow.lastBoundaryOrder.length > 0
+      ? timeflow.lastBoundaryOrder.join(" -> ")
+      : "no boundaries resolved";
+  if (success) {
+    timeflow.lastResolutionNote = `${trigger}: ${boundaryLine} at Day ${timeflow.lastResolvedDay}.`;
+  } else {
+    timeflow.lastResolutionNote = `${trigger}: boundary attempt failed at Day ${timeflow.lastResolvedDay}.`;
+  }
+  if (state.lastReport && typeof state.lastReport === "object") {
+    state.lastReport.timeflowSummary = timeflow.lastResolutionNote;
+  }
+}
+
+function setTimeflowParityStatus(status = "unverified") {
+  state.timeflow = createTimeflowRuntimeState(state.timeflow);
+  state.timeflow.diagnostics.lastParityStatus = `${status}`;
+}
+
+function getTimeflowDiagnostics() {
+  state.timeflow = createTimeflowRuntimeState(state.timeflow);
+  return {
+    lastResolutionNote: state.timeflow.lastResolutionNote,
+    lastBoundaryOrder: state.timeflow.lastBoundaryOrder.slice(),
+    queueSummary: state.timeflow.lastQueueSummary,
+    pendingIntents: state.timeflow.intentQueue.map((entry) => ({ ...entry })),
+    guardRecoveries: state.timeflow.diagnostics.guardRecoveries,
+    parityStatus: state.timeflow.diagnostics.lastParityStatus
+  };
+}
+
+function getTimeflowContractStatus() {
+  normalizeWorldState();
+  state.timeflow = createTimeflowRuntimeState(state.timeflow);
+  return {
+    version: TIMEFLOW_CONTRACT_VERSION,
+    units: { ...TIMEFLOW_UNITS },
+    boundaryOrder: TIMEFLOW_BOUNDARY_ORDER.slice(),
+    ownership: { ...TIMEFLOW_OWNERSHIP },
+    triggerPrecedence: TIMEFLOW_TRIGGER_PRECEDENCE.slice(),
+    planningTiming: getPlanningTimingMatrix(),
+    runtime: {
+      ...state.timeflow
+    }
+  };
+}
+
+function getSimulationClockStatus() {
+  normalizeWorldState();
+  state.clock = createSimulationClockState(state.clock);
+  const clock = state.clock;
+  const totalMinutes = Math.max(0, Math.min(MINUTES_PER_DAY - 1, Math.round(Number(clock.minuteOfDay) || 0)));
+  const hour24 = Math.floor(totalMinutes / 60);
+  const minute = totalMinutes % 60;
+  const hour12 = ((hour24 + 11) % 12) + 1;
+  const ampm = hour24 >= 12 ? "PM" : "AM";
+  const speedLabel = clock.speed === 0 ? "Pause" : clock.speed === 1 ? "Play" : `Fast x${clock.speed}`;
+  return {
+    minuteOfDay: totalMinutes,
+    hour24,
+    minute,
+    label: `${hour12}:${`${minute}`.padStart(2, "0")} ${ampm}`,
+    speed: clock.speed,
+    speedLabel,
+    isPaused: clock.speed === 0
+  };
+}
+
+function setSimulationSpeed(speed = 0) {
+  normalizeWorldState();
+  const parsed = Math.round(Number(speed) || 0);
+  if (!SIMULATION_SPEEDS.includes(parsed)) {
+    return {
+      ok: false,
+      error: `Unsupported simulation speed: ${speed}. Allowed values: ${SIMULATION_SPEEDS.join(", ")}.`
+    };
+  }
+  state.clock = createSimulationClockState({ ...state.clock, speed: parsed });
+  logLine(
+    parsed === 0
+      ? "Simulation paused."
+      : parsed === 1
+        ? "Simulation speed set to Play."
+        : `Simulation speed set to Fast Forward x${parsed}.`,
+    "neutral"
+  );
+  render();
+  return { ok: true, clock: getSimulationClockStatus() };
+}
+
+function advanceSimulationMinutes(minutes = 1) {
+  normalizeWorldState();
+  const increment = Math.max(0, Math.round(Number(minutes) || 0));
+  if (increment <= 0) {
+    return { ok: false, error: "Simulation minute increment must be positive." };
+  }
+  state.clock = createSimulationClockState(state.clock);
+  let dayAdvanced = 0;
+  state.clock.minuteOfDay += increment;
+  while (state.clock.minuteOfDay >= MINUTES_PER_DAY) {
+    state.clock.minuteOfDay -= MINUTES_PER_DAY;
+    const dayResult = advanceDay({ autoPrepareExecution: true, trigger: "midnight_rollover" });
+    if (!dayResult.ok) {
+      return {
+        ok: false,
+        error: dayResult.error || "Failed to advance day during simulation tick.",
+        dayAdvanced,
+        clock: getSimulationClockStatus()
+      };
+    }
+    dayAdvanced += 1;
+  }
+  return {
+    ok: true,
+    dayAdvanced,
+    clock: getSimulationClockStatus()
+  };
+}
+
+function getManagerPhaseStatus() {
+  normalizeWorldState();
+  const manager = getManagerState();
+  state.timeflow = createTimeflowRuntimeState(state.timeflow);
+  const summarizePlan = (plan) => {
+    if (!plan || typeof plan !== "object") {
+      return "No plan committed.";
+    }
+    return (
+      `Staff ${plan.staffingIntent}, pricing ${plan.pricingIntent}, procurement ${plan.procurementIntent}, ` +
+      `marketing ${plan.marketingIntent}, logistics ${plan.logisticsIntent}, risk ${plan.riskTolerance}, ` +
+      `reserve ${formatCoin(plan.reserveGoldTarget || 0)}, supply budget ${formatCoin(plan.supplyBudgetCap || 0)}.`
+    );
+  };
+  return {
+    phase: manager.phase,
+    weekIndex: manager.weekIndex,
+    dayInWeek: manager.dayInWeek,
+    planCommitted: manager.planCommitted,
+    transitionReason: manager.transitionReason,
+    guardNote: manager.guardNote,
+    committedPlan: manager.committedPlan ? { ...manager.committedPlan } : null,
+    planDraft: { ...manager.planDraft },
+    planDraftSummary: summarizePlan(manager.planDraft),
+    committedPlanSummary: summarizePlan(manager.committedPlan),
+    supplyPlanner: manager.supplyPlanner ? { ...manager.supplyPlanner } : null,
+    recruitment: {
+      market: manager.recruitment.market.map((entry) => ({ ...entry })),
+      shortlist: manager.recruitment.shortlist.slice(),
+      lastRefreshWeek: manager.recruitment.lastRefreshWeek,
+      lastSummary: manager.recruitment.lastSummary
+    },
+    objectives: {
+      active: manager.objectives.active.map((entry) => ({ ...entry })),
+      completed: manager.objectives.completed.map((entry) => ({ ...entry })),
+      failed: manager.objectives.failed.map((entry) => ({ ...entry })),
+      lastSummary: manager.objectives.lastSummary
+    },
+    timeline: manager.timeline ? { ...manager.timeline } : null,
+    planningContext: manager.planningContext ? { ...manager.planningContext } : null,
+    lastWeekSummary: manager.lastWeekSummary,
+    planningTiming: getPlanningTimingMatrix(),
+    pendingIntents: state.timeflow.intentQueue.map((entry) => ({ ...entry })),
+    queueSummary: state.timeflow.lastQueueSummary,
+    timeflowGuardRecoveries: state.timeflow.diagnostics.guardRecoveries
+  };
+}
+
+function getManagerLayerStatus() {
+  normalizeWorldState();
+  const manager = getManagerState();
+  const recruitment = manager.recruitment.market || [];
+  const confidenceAvg =
+    recruitment.length > 0
+      ? Math.round(
+          recruitment.reduce((sum, candidate) => sum + (Number(candidate.confidence) || 0), 0) /
+            recruitment.length
+        )
+      : 0;
+  const unresolvedTraits = recruitment.reduce((sum, candidate) => {
+    const hidden = Array.isArray(candidate.hiddenTraits) ? candidate.hiddenTraits.length : 0;
+    const revealed = Array.isArray(candidate.revealedTraits) ? candidate.revealedTraits.length : 0;
+    return sum + Math.max(0, hidden - revealed);
+  }, 0);
+  const activeObjectives = manager.objectives.active || [];
+  const objectiveDeadlinePressure = activeObjectives.filter((objective) => objective.remainingWeeks <= 1).length;
+
+  return {
+    day: state.day,
+    contractVersion: 1,
+    handoffContract: {
+      version: 1,
+      generatedAtDay: state.day,
+      phaseState: {
+        phase: manager.phase,
+        weekIndex: manager.weekIndex,
+        dayInWeek: manager.dayInWeek,
+        planCommitted: manager.planCommitted
+      },
+      weeklyPlan: {
+        draft: { ...manager.planDraft },
+        committed: manager.committedPlan ? { ...manager.committedPlan } : null,
+        planningContext: manager.planningContext ? { ...manager.planningContext } : null,
+        transitionReason: manager.transitionReason
+      },
+      staffingDecisions: {
+        rotaPreset: state.rotaPreset,
+        lastStaffingSummary: state.lastReport && typeof state.lastReport.staffing === "string"
+          ? state.lastReport.staffing
+          : "",
+        currentStaffCount: Array.isArray(state.staff) ? state.staff.length : 0,
+        unavailableStaffCount: Array.isArray(state.staff)
+          ? state.staff.filter((person) => isStaffUnavailable(person)).length
+          : 0
+      },
+      recruitmentIntel: {
+        market: recruitment.map((candidate) => ({
+          id: candidate.id,
+          name: candidate.name,
+          role: candidate.role,
+          visibleService: candidate.visibleService,
+          visibleQuality: candidate.visibleQuality,
+          potentialMin: candidate.potentialMin,
+          potentialMax: candidate.potentialMax,
+          expectedWage: candidate.expectedWage,
+          confidence: candidate.confidence,
+          daysRemaining: candidate.daysRemaining,
+          interest: candidate.interest,
+          competingPressure: candidate.competingPressure,
+          revealedTraits: Array.isArray(candidate.revealedTraits) ? candidate.revealedTraits.slice() : []
+        })),
+        shortlist: manager.recruitment.shortlist.slice(),
+        summary: manager.recruitment.lastSummary,
+        uncertainty: {
+          averageConfidence: confidenceAvg,
+          unresolvedTraitCount: unresolvedTraits
+        }
+      },
+      objectiveTimeline: {
+        active: activeObjectives.map((objective) => ({ ...objective })),
+        completed: manager.objectives.completed.map((objective) => ({ ...objective })),
+        failed: manager.objectives.failed.map((objective) => ({ ...objective })),
+        summary: manager.objectives.lastSummary,
+        deadlinePressure: objectiveDeadlinePressure
+      },
+      seasonalTimeline: {
+        ...manager.timeline
+      }
+    }
+  };
+}
+
 function getCohortLoyaltyAverages() {
   const output = {};
   Object.keys(COHORT_PROFILES).forEach((cohortId) => {
@@ -1241,11 +2273,23 @@ function buildCityStockRunBundle(bundleScale, volatility, contractBoost = 1) {
 }
 
 function signLocalBrokerContract() {
+  const actionWindow = requireActionWindow("local_contract");
+  if (!actionWindow.ok) {
+    logLine(actionWindow.error, "bad");
+    render();
+    return { ok: false, error: actionWindow.error };
+  }
   normalizeWorldState();
   const merchantStanding = getWorldActors().merchant_houses.standing;
   const suppliers = state.world.suppliers;
   const discount = merchantStanding >= 60 ? 3 : 0;
   const fee = Math.max(16, 24 - discount);
+  const cadence = enforceActionCadence("local_contract", { perMinute: true, perDay: true });
+  if (!cadence.ok) {
+    logLine(cadence.error, "bad");
+    render();
+    return { ok: false, error: cadence.error };
+  }
   if (!spendGold(fee, "Local broker contract")) {
     return { ok: false, error: "Not enough gold to secure local broker terms." };
   }
@@ -1261,6 +2305,12 @@ function signLocalBrokerContract() {
 }
 
 function signArcanumWholesaleContract() {
+  const actionWindow = requireActionWindow("wholesale_contract");
+  if (!actionWindow.ok) {
+    logLine(actionWindow.error, "bad");
+    render();
+    return { ok: false, error: actionWindow.error };
+  }
   normalizeWorldState();
   const district = getCurrentDistrictProfile();
   const suppliers = state.world.suppliers;
@@ -1274,6 +2324,12 @@ function signArcanumWholesaleContract() {
   }
 
   const fee = merchantWindow ? 28 : 36;
+  const cadence = enforceActionCadence("wholesale_contract", { perMinute: true, perDay: true });
+  if (!cadence.ok) {
+    logLine(cadence.error, "bad");
+    render();
+    return { ok: false, error: cadence.error };
+  }
   if (!spendGold(fee, "Arcanum wholesale contract")) {
     return { ok: false, error: "Not enough gold for wholesale contract terms." };
   }
@@ -1292,6 +2348,12 @@ function signArcanumWholesaleContract() {
 }
 
 function scheduleCityStockRun(bundleScale = 1) {
+  const actionWindow = requireActionWindow("city_stock_run");
+  if (!actionWindow.ok) {
+    logLine(actionWindow.error, "bad");
+    render();
+    return { ok: false, error: actionWindow.error };
+  }
   normalizeWorldState();
   const suppliers = state.world.suppliers;
   if (suppliers.stockRun.daysRemaining > 0) {
@@ -1321,6 +2383,12 @@ function scheduleCityStockRun(bundleScale = 1) {
   const logisticsCost = Math.round((outbound.cost + inbound.cost + 10) * scale);
   const cargoDeposit = Math.round((42 + randInt(0, 18)) * scale);
   const totalCost = logisticsCost + cargoDeposit;
+  const cadence = enforceActionCadence("city_stock_run", { perMinute: true, perWeek: true });
+  if (!cadence.ok) {
+    logLine(cadence.error, "bad");
+    render();
+    return { ok: false, error: cadence.error };
+  }
 
   if (!spendGold(totalCost, "City stock-up run")) {
     return { ok: false, error: "Not enough gold for logistics and cargo deposit." };
@@ -1528,6 +2596,7 @@ function createInitialState(locationId = DEFAULT_STARTING_LOCATION) {
   const lowestActor = actorList[actorList.length - 1];
   return {
     day: 1,
+    manager: normalizeManagerState(null, 1, startingLocation.id),
     world: {
       startingLocation: startingLocation.id,
       activeLocation: startingLocation.id,
@@ -1556,6 +2625,8 @@ function createInitialState(locationId = DEFAULT_STARTING_LOCATION) {
       travelRouteCost: 0,
       travelRouteDays: 0
     },
+    clock: createSimulationClockState(),
+    timeflow: createTimeflowRuntimeState(),
     gold: 260,
     reputation: 45,
     condition: 70,
@@ -1624,6 +2695,8 @@ function createInitialState(locationId = DEFAULT_STARTING_LOCATION) {
       actorEvent: "Influence climate steady. No major factions moved today.",
       actorSummary: `${highestActor.label} standing ${highestActor.standing}, ${lowestActor.label} standing ${lowestActor.standing}.`,
       crownSummary: "Crown ledger current. Next collection due on Day 7.",
+      objectiveSummary: "Objective board not generated yet.",
+      seasonSummary: "Year 1, Spring week 1.",
       compliance: initialCrown.complianceScore,
       rivalPressure: Math.round(
         (startingDistrict.rivalTaverns.reduce((sum, rival) => sum + rival.pressure, 0) /
@@ -1746,8 +2819,8 @@ let initialized = false;
       worldActors,
       crownAuthority.complianceScore
     );
-    const reporting = createWorldReportingState(current.reporting, state.day);
-    state.world = {
+  const reporting = createWorldReportingState(current.reporting, state.day);
+  state.world = {
       ...current,
       startingLocation: startingLocation.id,
       activeLocation: correctedActiveLocation.id,
@@ -1776,6 +2849,9 @@ let initialized = false;
       travelRouteCost: Math.max(0, Math.round(Number(current.travelRouteCost) || 0)),
       travelRouteDays: Math.max(0, Math.round(Number(current.travelRouteDays) || 0))
     };
+    state.clock = createSimulationClockState(state.clock);
+    state.timeflow = createTimeflowRuntimeState(state.timeflow);
+    state.manager = normalizeManagerState(state.manager, state.day, correctedActiveLocation.id);
   }
 
   function getCrownAuthority() {
@@ -1991,6 +3067,12 @@ let initialized = false;
   }
 
   function settleCrownArrears(amount = null) {
+    const actionWindow = requireActionWindow("settle_arrears");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return { ok: false, error: actionWindow.error };
+    }
     const crown = getCrownAuthority();
     if (crown.arrears <= 0) {
       logLine("No Crown arrears are currently outstanding.", "neutral");
@@ -2024,6 +3106,12 @@ let initialized = false;
   }
 
   function fileComplianceReport() {
+    const actionWindow = requireActionWindow("file_compliance");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return { ok: false, error: actionWindow.error };
+    }
     const crown = getCrownAuthority();
     const filingCost = 12;
     if (!spendGold(filingCost, "Voluntary tax filing")) {
@@ -2431,6 +3519,12 @@ let initialized = false;
   }
 
   function setRotaPreset(preset) {
+    const actionWindow = requireActionWindow("set_rota");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return;
+    }
     if (!ROTA_PRESETS[preset]) {
       return;
     }
@@ -2440,13 +3534,28 @@ let initialized = false;
   }
 
   function adjustPrice(product, delta) {
+    const actionWindow = requireActionWindow("adjust_price");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return;
+    }
     const next = clamp(state.prices[product] + delta, 1, 40);
     state.prices[product] = next;
     logLine(`${product.toUpperCase()} price set to ${formatCoin(next)}.`, "neutral");
     render();
   }
 
-  function buySupply(item, amount, unitCost) {
+  function buySupply(item, amount, unitCost, options = null) {
+    const silent = Boolean(options && options.silent);
+    const actionWindow = requireActionWindow("buy_supply", options);
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      if (!silent) {
+        render();
+      }
+      return { ok: false, error: actionWindow.error };
+    }
     normalizeWorldState();
     const location = getActiveLocationProfile();
     const district = getCurrentDistrictProfile();
@@ -2455,20 +3564,26 @@ let initialized = false;
     const market = getSupplierCurrentMarket();
     if (isDistrictTravelActive()) {
       logLine("Supply orders are paused while your caravan is in transit.", "bad");
-      render();
-      return;
+      if (!silent) {
+        render();
+      }
+      return { ok: false, error: "Travel in progress." };
     }
     if (!market) {
       logLine("Supply ledger unavailable for the active district.", "bad");
-      render();
-      return;
+      if (!silent) {
+        render();
+      }
+      return { ok: false, error: "Market unavailable." };
     }
 
     const marketAvailable = Math.max(0, Math.round(Number(market.stock[item]) || 0));
     if (marketAvailable <= 0) {
       logLine(`${district.label} market has no ${item} lots left today.`, "bad");
-      render();
-      return;
+      if (!silent) {
+        render();
+      }
+      return { ok: false, error: "Market out of stock." };
     }
 
     const merchantWindow = isMerchantWindowActiveForDistrict(suppliers, district.id);
@@ -2485,8 +3600,10 @@ let initialized = false;
     const effectiveChance = clamp(availabilityRoll + lotAvailabilityBuffer, 0.15, 0.99);
     if (random.nextFloat() > effectiveChance) {
       logLine(`No fresh ${item} lots were available in ${district.label} today.`, "bad");
-      render();
-      return;
+      if (!silent) {
+        render();
+      }
+      return { ok: false, error: "No fresh lots available." };
     }
 
     const volatilityMult = getSupplierVolatilityCostMult(suppliers.volatility);
@@ -2507,7 +3624,7 @@ let initialized = false;
     );
     const total = purchasableAmount * adjustedUnitCost;
     if (!spendGold(total, `Buy ${item}`)) {
-      return;
+      return { ok: false, error: "Not enough gold." };
     }
     market.stock[item] = Math.max(0, marketAvailable - purchasableAmount);
     if (isSupplyItem(item)) {
@@ -2535,8 +3652,10 @@ let initialized = false;
           "neutral"
         );
       }
-      render();
-      return;
+      if (!silent) {
+        render();
+      }
+      return { ok: true, item, amount: purchasableAmount, total };
     }
     state.inventory[item] += purchasableAmount;
     if (purchasableAmount < adjustedAmount) {
@@ -2547,10 +3666,19 @@ let initialized = false;
     } else {
       logLine(`Purchased ${purchasableAmount} ${item} in ${district.label} for ${formatCoin(total)}.`, "neutral");
     }
-    render();
+    if (!silent) {
+      render();
+    }
+    return { ok: true, item, amount: purchasableAmount, total };
   }
 
   function startDistrictTravel(destinationId) {
+    const actionWindow = requireActionWindow("district_travel");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return { ok: false, error: actionWindow.error };
+    }
     normalizeWorldState();
     if (!destinationId || typeof destinationId !== "string") {
       return { ok: false, error: "Choose a destination district." };
@@ -2571,6 +3699,12 @@ let initialized = false;
         ok: false,
         error: `No travel route from ${currentDistrict.label} to ${destination.label}.`
       };
+    }
+    const cadence = enforceActionCadence("district_travel", { perMinute: true, perDay: true });
+    if (!cadence.ok) {
+      logLine(cadence.error, "bad");
+      render();
+      return { ok: false, error: cadence.error };
     }
     if (!spendGold(route.cost, `Travel to ${destination.label}`)) {
       return { ok: false, error: "Not enough gold for travel." };
@@ -2619,6 +3753,741 @@ let initialized = false;
     };
   }
 
+  function transitionManagerPhase(nextPhase, reason, options = {}) {
+    const activeLocationId =
+      state.world && typeof state.world === "object"
+        ? state.world.activeLocation || state.world.startingLocation || DEFAULT_STARTING_LOCATION
+        : DEFAULT_STARTING_LOCATION;
+    state.manager = normalizeManagerState(state.manager, state.day, activeLocationId);
+    const manager = state.manager;
+    const target = typeof nextPhase === "string" ? nextPhase : MANAGER_PHASES.PLANNING;
+    const note = typeof reason === "string" && reason.length > 0 ? reason : "Phase transition.";
+    const force = Boolean(options.force);
+    if (!force && !isValidManagerTransition(manager.phase, target)) {
+      state.timeflow = createTimeflowRuntimeState(state.timeflow);
+      state.timeflow.diagnostics.guardRecoveries += 1;
+      manager.guardNote =
+        `Invalid phase transition blocked (${manager.phase} -> ${target}) on Day ${state.day}.`;
+      return { ok: false, error: manager.guardNote };
+    }
+    manager.phase = target;
+    manager.transitionReason = note;
+    manager.lastTransitionDay = state.day;
+    manager.guardNote = "";
+    return { ok: true, phase: manager.phase };
+  }
+
+  function primeCommittedPlanFromDraft(options = {}) {
+    const resetSupplySpent = options.resetSupplySpent !== false;
+    const refreshContext = options.refreshContext !== false;
+    const autoRelax = options.autoRelax !== false;
+    if (refreshContext) {
+      refreshPlanningContext({ overwriteDraft: false });
+    }
+    let manager = getManagerState();
+    let envelope = validateWeeklyPlanEnvelope(manager.planDraft);
+    if (!envelope.ok && autoRelax) {
+      const draft = manager.planDraft;
+      const maxReserveAllowed = Math.max(0, Math.round(state.gold - 5));
+      draft.reserveGoldTarget = clamp(Math.round(Number(draft.reserveGoldTarget) || 0), 0, maxReserveAllowed);
+      const maxSupplyAllowed = Math.max(0, Math.round(state.gold + 10 - draft.reserveGoldTarget));
+      draft.supplyBudgetCap = clamp(Math.round(Number(draft.supplyBudgetCap) || 0), 0, maxSupplyAllowed);
+      const compliance = getCrownAuthority().complianceScore;
+      if (`${draft.riskTolerance || "moderate"}` === "high" && compliance < 52) {
+        draft.riskTolerance = "moderate";
+      }
+      if (`${draft.marketingIntent || "steady"}` === "campaign" && state.gold < 30) {
+        draft.marketingIntent = "steady";
+      }
+      if (`${draft.logisticsIntent || "local"}` === "city_push" && isDistrictTravelActive()) {
+        draft.logisticsIntent = "local";
+      }
+      envelope = validateWeeklyPlanEnvelope(draft);
+    }
+    if (!envelope.ok) {
+      return {
+        ok: false,
+        error: `Cannot commit weekly plan: ${envelope.errors.join(" ")}`,
+        errors: envelope.errors
+      };
+    }
+    manager = getManagerState();
+    manager.committedPlan = { ...manager.planDraft, weekIndex: manager.weekIndex };
+    manager.planCommitted = true;
+    manager.supplyPlanner.weeklyBudgetCap = Math.max(0, Math.round(Number(manager.committedPlan.supplyBudgetCap) || 0));
+    if (resetSupplySpent) {
+      manager.supplyPlanner.spent = 0;
+    }
+    manager.supplyPlanner.lastAction = "Supply planner primed from committed weekly plan.";
+    return { ok: true };
+  }
+
+  function ensureExecutionPhaseForLiveSim(reason = "Live simulation step.") {
+    normalizeWorldState();
+    let manager = getManagerState();
+    if (!manager.planCommitted || !manager.committedPlan) {
+      const commit = primeCommittedPlanFromDraft({ refreshContext: true });
+      if (!commit.ok) {
+        return commit;
+      }
+      manager = getManagerState();
+    }
+    if (manager.phase !== MANAGER_PHASES.EXECUTION) {
+      const transition = transitionManagerPhase(MANAGER_PHASES.EXECUTION, reason, { force: true });
+      if (!transition.ok) {
+        return transition;
+      }
+    }
+    return { ok: true };
+  }
+
+  function commitWeeklyPlan() {
+    const actionWindow = requireActionWindow("commit_plan");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return { ok: false, error: actionWindow.error };
+    }
+    normalizeWorldState();
+    const manager = getManagerState();
+    const wasExecution = manager.phase === MANAGER_PHASES.EXECUTION;
+    const commit = primeCommittedPlanFromDraft({
+      resetSupplySpent: !wasExecution,
+      refreshContext: true
+    });
+    if (!commit.ok) {
+      const reason = commit.error || "Cannot commit weekly plan.";
+      logLine(reason, "bad");
+      render();
+      return { ok: false, error: reason, errors: commit.errors || [] };
+    }
+    if (!wasExecution) {
+      const transition = transitionManagerPhase(
+        MANAGER_PHASES.EXECUTION,
+        `Week ${manager.weekIndex} plan committed.`
+      );
+      if (!transition.ok) {
+        return transition;
+      }
+    }
+    logLine(
+      wasExecution
+        ? `Week ${manager.weekIndex} plan updated for live execution.`
+        : `Week ${manager.weekIndex} plan committed. Execution phase started.`,
+      "good"
+    );
+    render();
+    const phase = getManagerState().phase;
+    return { ok: true, weekIndex: manager.weekIndex, phase };
+  }
+
+  function updateWeeklyPlanDraft(updates = {}) {
+    const actionWindow = requireActionWindow("update_plan_draft");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return { ok: false, error: actionWindow.error };
+    }
+    normalizeWorldState();
+    const manager = getManagerState();
+    if (!updates || typeof updates !== "object") {
+      return { ok: false, error: "Draft update payload is required." };
+    }
+    const allowed = [
+      "staffingIntent",
+      "pricingIntent",
+      "procurementIntent",
+      "marketingIntent",
+      "logisticsIntent",
+      "riskTolerance",
+      "reserveGoldTarget",
+      "supplyBudgetCap",
+      "menuFallbackPolicy",
+      "note"
+    ];
+    let queuedCount = 0;
+    let immediateCount = 0;
+    allowed.forEach((field) => {
+      if (updates[field] !== undefined) {
+        const normalizedValue = normalizePlanningFieldValue(field, updates[field]);
+        manager.planDraft[field] = normalizedValue;
+        const timing = PLAN_EFFECT_TIMING[field] || "next_day";
+        if (manager.phase === MANAGER_PHASES.EXECUTION && manager.planCommitted && manager.committedPlan) {
+          if (timing === "instant") {
+            applyPlanningFieldToPlans(field, normalizedValue);
+            immediateCount += 1;
+          } else {
+            queuePlanningIntent(field, normalizedValue, timing, "planning_board");
+            queuedCount += 1;
+          }
+        }
+      }
+    });
+    manager.planDraft.weekIndex = manager.weekIndex;
+    if (queuedCount > 0) {
+      manager.supplyPlanner.lastAction =
+        `Queued ${queuedCount} planning update${queuedCount === 1 ? "" : "s"} for future boundary application.`;
+    } else if (immediateCount > 0) {
+      manager.supplyPlanner.lastAction = "Immediate planning updates applied.";
+    }
+    refreshPlanningContext({ overwriteDraft: false });
+    render();
+    return {
+      ok: true,
+      draft: { ...manager.planDraft },
+      queuedCount,
+      immediateCount,
+      queueSummary: state.timeflow ? state.timeflow.lastQueueSummary : ""
+    };
+  }
+
+  function validateWeeklyPlanEnvelope(draft = {}) {
+    const errors = [];
+    const reserve = Math.max(0, Math.round(Number(draft.reserveGoldTarget) || 0));
+    const supplyBudgetCap = Math.max(0, Math.round(Number(draft.supplyBudgetCap) || 0));
+    const risk = `${draft.riskTolerance || "moderate"}`;
+    const marketing = `${draft.marketingIntent || "steady"}`;
+    const compliance = getCrownAuthority().complianceScore;
+    const maxReserveAllowed = Math.max(0, Math.round(state.gold - 5));
+
+    if (reserve > maxReserveAllowed) {
+      errors.push(`Reserve target ${formatCoin(reserve)} exceeds available planning envelope ${formatCoin(maxReserveAllowed)}.`);
+    }
+    if (reserve + supplyBudgetCap > Math.max(0, state.gold + 10)) {
+      errors.push(
+        `Reserve + supply budget (${formatCoin(reserve + supplyBudgetCap)}) exceeds practical weekly envelope for current gold ${formatCoin(state.gold)}.`
+      );
+    }
+    if (risk === "high" && compliance < 52) {
+      errors.push(`High risk plans require Crown compliance >= 52 (current ${compliance}).`);
+    }
+    if (marketing === "campaign" && state.gold < 30) {
+      errors.push(`Campaign marketing requires at least ${formatCoin(30)} on hand (current ${formatCoin(state.gold)}).`);
+    }
+    if (draft.logisticsIntent === "city_push" && isDistrictTravelActive()) {
+      errors.push("City push logistics cannot be committed while district travel is active.");
+    }
+
+    return { ok: errors.length === 0, errors };
+  }
+
+  function createRecruitmentCandidateForWeek(weekIndex, scoutBias = 0) {
+    const first = pick(PATRON_FIRST_NAMES);
+    const last = pick(PATRON_LAST_NAMES);
+    const role = pick(["server", "cook", "barkeep", "guard"]);
+    const roleBias =
+      role === "cook"
+        ? { service: -2, quality: 3 }
+        : role === "server"
+          ? { service: 3, quality: -1 }
+          : role === "barkeep"
+            ? { service: 2, quality: 1 }
+            : { service: 1, quality: 0 };
+    const trueService = Math.max(5, Math.min(28, randInt(8, 20) + roleBias.service));
+    const trueQuality = Math.max(3, Math.min(24, randInt(5, 17) + roleBias.quality));
+    const uncertainty = Math.max(1, Math.round(6 - scoutBias));
+    const visibleService = clamp(trueService + randInt(-uncertainty, uncertainty), 1, 30);
+    const visibleQuality = clamp(trueQuality + randInt(-uncertainty, uncertainty), 1, 25);
+    const potentialMin = clamp(Math.min(trueService, trueQuality) + randInt(2, 5), 6, 35);
+    const potentialMax = clamp(Math.max(trueService, trueQuality) + randInt(4, 11), potentialMin, 40);
+    const expectedWage = clamp(
+      Math.round(7 + trueService * 0.24 + trueQuality * 0.28 + randInt(-1, 3)),
+      6,
+      30
+    );
+    const visibleTraitsPool = ["steady", "punctual", "friendly", "hardy", "neat", "quick learner"];
+    const hiddenTraitsPool = ["temperamental", "clutch performer", "slow starter", "union-minded", "moonlighter", "merchant ties"];
+    return {
+      id: random.randomId(8),
+      name: `${first} ${last}`,
+      role,
+      trueService,
+      trueQuality,
+      potentialMin,
+      potentialMax,
+      expectedWage,
+      visibleService,
+      visibleQuality,
+      confidence: clamp(32 + scoutBias * 12 + randInt(-4, 6), 10, 90),
+      daysRemaining: clamp(randInt(4, 9), 2, 14),
+      interest: clamp(randInt(42, 78), 15, 100),
+      competingPressure: clamp(randInt(18, 72), 0, 100),
+      visibleTraits: [pick(visibleTraitsPool), pick(visibleTraitsPool)].filter((value, index, arr) => arr.indexOf(value) === index),
+      hiddenTraits: [pick(hiddenTraitsPool), pick(hiddenTraitsPool)].filter((value, index, arr) => arr.indexOf(value) === index),
+      revealedTraits: [],
+      weekIndex
+    };
+  }
+
+  function refreshRecruitmentMarketForWeek(force = false) {
+    const manager = getManagerState();
+    const recruitment = manager.recruitment;
+    if (!force && recruitment.lastRefreshWeek === manager.weekIndex && recruitment.market.length > 0) {
+      return recruitment.lastSummary;
+    }
+    const scoutBias = manager.planDraft.staffingIntent === "training_push" ? 1 : 0;
+    const seasonId = manager.timeline && manager.timeline.seasonId ? manager.timeline.seasonId : "spring";
+    const poolSize =
+      seasonId === "winter"
+        ? randInt(3, 5)
+        : seasonId === "harvest"
+          ? randInt(5, 8)
+          : randInt(4, 7);
+    recruitment.market = Array.from({ length: poolSize }, () =>
+      createRecruitmentCandidateForWeek(manager.weekIndex, scoutBias)
+    );
+    recruitment.shortlist = [];
+    recruitment.lastRefreshWeek = manager.weekIndex;
+    recruitment.lastSummary =
+      `Week ${manager.weekIndex} recruitment pool posted (${recruitment.market.length} candidates, ` +
+      `${recruitment.market.filter((candidate) => candidate.role === "cook").length} cooks).`;
+    return recruitment.lastSummary;
+  }
+
+  function progressRecruitmentMarketDay() {
+    const recruitment = getManagerState().recruitment;
+    if (!Array.isArray(recruitment.market) || recruitment.market.length === 0) {
+      recruitment.lastSummary = "Recruitment board is empty.";
+      return recruitment.lastSummary;
+    }
+    let expired = 0;
+    let signedElsewhere = 0;
+    recruitment.market = recruitment.market.filter((candidate) => {
+      candidate.daysRemaining = Math.max(0, candidate.daysRemaining - 1);
+      candidate.competingPressure = clamp(candidate.competingPressure + randInt(-4, 7), 0, 100);
+      if (candidate.daysRemaining <= 0) {
+        expired += 1;
+        return false;
+      }
+      const offerChance = clamp(0.05 + candidate.competingPressure / 180, 0.05, 0.55);
+      if (random.nextFloat() < offerChance) {
+        signedElsewhere += 1;
+        return false;
+      }
+      return true;
+    });
+    recruitment.shortlist = recruitment.shortlist.filter((candidateId) =>
+      recruitment.market.some((candidate) => candidate.id === candidateId)
+    );
+    recruitment.lastSummary =
+      expired + signedElsewhere > 0
+        ? `Recruitment market shifted: ${expired} expired, ${signedElsewhere} signed elsewhere. ${recruitment.market.length} remain.`
+        : `Recruitment market steady: ${recruitment.market.length} active candidates.`;
+    return recruitment.lastSummary;
+  }
+
+  function shortlistRecruitCandidate(candidateId) {
+    const actionWindow = requireActionWindow("shortlist_candidate");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return { ok: false, error: actionWindow.error };
+    }
+    const recruitment = getManagerState().recruitment;
+    const candidate = recruitment.market.find((entry) => entry.id === candidateId);
+    if (!candidate) {
+      return { ok: false, error: "Candidate not available." };
+    }
+    if (!recruitment.shortlist.includes(candidateId)) {
+      recruitment.shortlist.push(candidateId);
+    }
+    logLine(`Shortlisted ${candidate.name} (${candidate.role}).`, "neutral");
+    render();
+    return { ok: true, candidateId };
+  }
+
+  function scoutRecruitCandidate(candidateId) {
+    const actionWindow = requireActionWindow("scout_candidate");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return { ok: false, error: actionWindow.error };
+    }
+    const recruitment = getManagerState().recruitment;
+    const candidate = recruitment.market.find((entry) => entry.id === candidateId);
+    if (!candidate) {
+      return { ok: false, error: "Candidate not available." };
+    }
+    const scoutCost = 4;
+    if (!spendGold(scoutCost, "Recruitment scouting")) {
+      render();
+      return { ok: false, error: "Not enough gold for scouting." };
+    }
+
+    const hiddenPool = candidate.hiddenTraits.filter((trait) => !candidate.revealedTraits.includes(trait));
+    if (hiddenPool.length > 0) {
+      const revealed = pick(hiddenPool);
+      candidate.revealedTraits.push(revealed);
+    }
+    candidate.confidence = clamp(candidate.confidence + randInt(10, 18), 0, 100);
+    const uncertainty = Math.max(1, Math.round((100 - candidate.confidence) / 18));
+    candidate.visibleService = clamp(candidate.trueService + randInt(-uncertainty, uncertainty), 1, 30);
+    candidate.visibleQuality = clamp(candidate.trueQuality + randInt(-uncertainty, uncertainty), 1, 25);
+    logLine(
+      `Scout report updated for ${candidate.name}: service ${candidate.visibleService}, quality ${candidate.visibleQuality}, confidence ${candidate.confidence}%.`,
+      "neutral"
+    );
+    render();
+    return { ok: true, candidateId };
+  }
+
+  function signRecruitCandidate(candidateId) {
+    const actionWindow = requireActionWindow("sign_candidate");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return { ok: false, error: actionWindow.error };
+    }
+    const recruitment = getManagerState().recruitment;
+    const index = recruitment.market.findIndex((entry) => entry.id === candidateId);
+    if (index < 0) {
+      return { ok: false, error: "Candidate not available." };
+    }
+    const candidate = recruitment.market[index];
+    const signingFee = Math.max(12, Math.round(candidate.expectedWage * 2));
+    if (!spendGold(signingFee, "Recruit signing fee")) {
+      render();
+      return { ok: false, error: "Not enough gold for signing fee." };
+    }
+
+    const recruit = createStaff(candidate.role);
+    recruit.service = clamp(candidate.trueService + randInt(-1, 1), 1, 30);
+    recruit.quality = clamp(candidate.trueQuality + randInt(-1, 1), 1, 25);
+    recruit.wage = clamp(candidate.expectedWage + randInt(-1, 2), 6, 32);
+    recruit.morale = clamp(58 + Math.round(candidate.interest / 8), 35, 95);
+    recruit.fatigue = clamp(randInt(8, 22), 0, 100);
+    state.staff.push(recruit);
+
+    recruitment.market.splice(index, 1);
+    recruitment.shortlist = recruitment.shortlist.filter((entry) => entry !== candidateId);
+    recruitment.lastSummary = `${candidate.name} signed as ${candidate.role}.`;
+    logLine(`Signed ${candidate.name} (${candidate.role}) for ${formatCoin(recruit.wage)} wage.`, "good");
+    render();
+    return { ok: true, candidateId, role: candidate.role };
+  }
+
+  function createObjectiveForWeek(weekIndex, seasonId = "spring") {
+    const templatePool =
+      seasonId === "winter"
+        ? ["crown_compliance", "merchant_margin", "merchant_margin", "investor_growth"]
+        : seasonId === "harvest"
+          ? ["merchant_margin", "investor_growth", "noble_prestige", "merchant_margin"]
+          : ["crown_compliance", "noble_prestige", "merchant_margin", "investor_growth"];
+    const templateId = pick(templatePool);
+    if (templateId === "crown_compliance") {
+      const goal = randInt(4, 6);
+      return {
+        id: random.randomId(10),
+        issuer: "crown_office",
+        type: templateId,
+        label: "Keep Crown Ledgers Clean",
+        description: `Hold Crown compliance at 60+ for ${goal} execution days.`,
+        remainingWeeks: 2,
+        goalValue: goal,
+        progressValue: 0,
+        metric: "compliance_days",
+        rewardGold: 22,
+        rewardReputation: 3,
+        penaltyGold: 14,
+        penaltyReputation: 2,
+        status: "active",
+        progressNote: "Awaiting first compliance checkpoint.",
+        originWeek: weekIndex,
+        payload: { threshold: 60 }
+      };
+    }
+    if (templateId === "noble_prestige") {
+      const goal = randInt(3, 5);
+      return {
+        id: random.randomId(10),
+        issuer: "noble_houses",
+        type: templateId,
+        label: "Host Refined Evenings",
+        description: `Record satisfaction 70+ across ${goal} service days.`,
+        remainingWeeks: 2,
+        goalValue: goal,
+        progressValue: 0,
+        metric: "satisfaction_days",
+        rewardGold: 18,
+        rewardReputation: 4,
+        penaltyGold: 10,
+        penaltyReputation: 2,
+        status: "active",
+        progressNote: "Noble observers are waiting for quality nights.",
+        originWeek: weekIndex,
+        payload: { threshold: 70 }
+      };
+    }
+    if (templateId === "investor_growth") {
+      const goal = randInt(130, 180);
+      return {
+        id: random.randomId(10),
+        issuer: "investors",
+        type: templateId,
+        label: "Deliver Investor Growth",
+        description: `Accumulate ${formatCoin(goal)} net over the objective window.`,
+        remainingWeeks: 3,
+        goalValue: goal,
+        progressValue: 0,
+        metric: "net_total",
+        rewardGold: 30,
+        rewardReputation: 2,
+        penaltyGold: 18,
+        penaltyReputation: 2,
+        status: "active",
+        progressNote: "Investor syndicate monitoring cumulative net.",
+        originWeek: weekIndex,
+        payload: { minimumNet: goal }
+      };
+    }
+    const goal = randInt(4, 6);
+    return {
+      id: random.randomId(10),
+      issuer: "merchant_houses",
+      type: "merchant_margin",
+      label: "Hold Merchant Margins",
+      description: `Log daily net >= ${formatCoin(24)} on ${goal} days.`,
+      remainingWeeks: 2,
+      goalValue: goal,
+      progressValue: 0,
+      metric: "margin_days",
+      rewardGold: 24,
+      rewardReputation: 2,
+      penaltyGold: 14,
+      penaltyReputation: 2,
+      status: "active",
+      progressNote: "Merchant clerks tracking daily surplus discipline.",
+      originWeek: weekIndex,
+      payload: { threshold: 24 }
+    };
+  }
+
+  function refreshObjectivesForWeek(force = false) {
+    const manager = getManagerState();
+    const objectives = manager.objectives;
+    if (!Array.isArray(objectives.active)) {
+      objectives.active = [];
+    }
+    if (!force && objectives.active.length >= 3) {
+      return objectives.lastSummary;
+    }
+    const seasonId = manager.timeline && manager.timeline.seasonId ? manager.timeline.seasonId : "spring";
+    while (objectives.active.length < 3) {
+      objectives.active.push(createObjectiveForWeek(manager.weekIndex, seasonId));
+    }
+    objectives.lastSummary =
+      `Objective board active: ${objectives.active.length} live arcs, ` +
+      `${objectives.completed.length} completed, ${objectives.failed.length} failed.`;
+    return objectives.lastSummary;
+  }
+
+  function updateObjectiveProgressDaily(dayContext = {}) {
+    const objectives = getManagerState().objectives;
+    const compliance = Math.max(0, Math.round(Number(dayContext.compliance) || 0));
+    const satisfaction = Math.max(0, Math.round(Number(dayContext.satisfaction) || 0));
+    const net = Math.round(Number(dayContext.net) || 0);
+    objectives.active.forEach((objective) => {
+      if (objective.type === "crown_compliance") {
+        const threshold = Math.max(40, Math.round(Number(objective.payload.threshold) || 60));
+        if (compliance >= threshold) {
+          objective.progressValue += 1;
+        }
+      } else if (objective.type === "noble_prestige") {
+        const threshold = Math.max(40, Math.round(Number(objective.payload.threshold) || 70));
+        if (satisfaction >= threshold) {
+          objective.progressValue += 1;
+        }
+      } else if (objective.type === "merchant_margin") {
+        const threshold = Math.max(0, Math.round(Number(objective.payload.threshold) || 24));
+        if (net >= threshold) {
+          objective.progressValue += 1;
+        }
+      } else if (objective.type === "investor_growth") {
+        objective.progressValue += Math.max(0, net);
+      }
+      objective.progressValue = Math.max(0, Math.round(objective.progressValue));
+      objective.progressNote = `${objective.label}: ${objective.progressValue}/${objective.goalValue} progress.`;
+    });
+    objectives.lastSummary = `Objective tracking updated for Day ${state.day}.`;
+  }
+
+  function evaluateObjectivesWeekBoundary() {
+    const manager = getManagerState();
+    const objectives = manager.objectives;
+    if (!Array.isArray(objectives.active) || objectives.active.length === 0) {
+      objectives.lastSummary = "No active objectives to evaluate this week.";
+      return objectives.lastSummary;
+    }
+    const remaining = [];
+    const succeeded = [];
+    const failed = [];
+    objectives.active.forEach((objective) => {
+      const completed = objective.progressValue >= objective.goalValue;
+      if (completed) {
+        objective.status = "completed";
+        objective.progressNote = `${objective.label} completed (${objective.progressValue}/${objective.goalValue}).`;
+        succeeded.push(objective);
+        return;
+      }
+      objective.remainingWeeks = Math.max(0, objective.remainingWeeks - 1);
+      if (objective.remainingWeeks <= 0) {
+        objective.status = "failed";
+        objective.progressNote = `${objective.label} failed (${objective.progressValue}/${objective.goalValue}).`;
+        failed.push(objective);
+        return;
+      }
+      remaining.push(objective);
+    });
+    let rewardGold = 0;
+    let rewardRep = 0;
+    let penaltyGold = 0;
+    let penaltyRep = 0;
+    const crown = state.world && state.world.crown ? state.world.crown : { complianceScore: 60 };
+    const actors = state.world && state.world.actors ? state.world.actors : {};
+    const shiftActorDirect = (actorId, delta) => {
+      const actor = actors[actorId];
+      if (!actor) {
+        return;
+      }
+      const shift = Math.round(Number(delta) || 0);
+      actor.standing = clamp(actor.standing + shift, 0, 100);
+      actor.lastShift = shift;
+    };
+    const applyEffectDirect = (effectId, days, value) => {
+      const effects = state.world && state.world.effects ? state.world.effects : null;
+      if (!effects) {
+        return;
+      }
+      const safeDays = Math.max(0, Math.round(Number(days) || 0));
+      if (effectId === "supply_cost") {
+        effects.supplyCostDays = safeDays;
+        effects.supplyCostMult = Math.max(0.5, Math.min(1.7, Number(value) || 1));
+      } else if (effectId === "tax_flat") {
+        effects.taxFlatDays = safeDays;
+        effects.taxFlatBonus = Math.max(-10, Math.min(35, Math.round(Number(value) || 0)));
+      }
+    };
+    succeeded.forEach((objective) => {
+      rewardGold += objective.rewardGold;
+      rewardRep += objective.rewardReputation;
+      if (objective.issuer === "crown_office") {
+        crown.complianceScore = clamp(crown.complianceScore + 3, 0, 100);
+        shiftActorDirect("crown_office", 2);
+      } else if (objective.issuer === "merchant_houses") {
+        shiftActorDirect("merchant_houses", 2);
+        applyEffectDirect("supply_cost", 2, 0.93);
+      } else if (objective.issuer === "noble_houses") {
+        shiftActorDirect("civic_council", 1);
+      } else if (objective.issuer === "investors") {
+        rewardGold += 6;
+      }
+    });
+    failed.forEach((objective) => {
+      penaltyGold += objective.penaltyGold;
+      penaltyRep += objective.penaltyReputation;
+      if (objective.issuer === "crown_office") {
+        crown.complianceScore = clamp(crown.complianceScore - 4, 0, 100);
+        shiftActorDirect("crown_office", -2);
+        applyEffectDirect("tax_flat", 2, 4);
+      } else if (objective.issuer === "merchant_houses") {
+        shiftActorDirect("merchant_houses", -2);
+        applyEffectDirect("supply_cost", 2, 1.08);
+      } else if (objective.issuer === "noble_houses") {
+        shiftActorDirect("civic_council", -1);
+      } else if (objective.issuer === "investors") {
+        penaltyGold += 4;
+      }
+    });
+    if (rewardGold > 0 || rewardRep > 0) {
+      state.gold += rewardGold;
+      state.reputation = clamp(state.reputation + rewardRep, 0, 100);
+      logLine(
+        `Objective rewards received: ${formatCoin(rewardGold)} and +${rewardRep} reputation.`,
+        "good"
+      );
+    }
+    if (penaltyGold > 0 || penaltyRep > 0) {
+      state.gold -= penaltyGold;
+      state.reputation = clamp(state.reputation - penaltyRep, 0, 100);
+      logLine(
+        `Objective penalties applied: ${formatCoin(penaltyGold)} and -${penaltyRep} reputation.`,
+        "bad"
+      );
+    }
+    objectives.active = remaining;
+    objectives.completed = [...succeeded, ...objectives.completed].slice(0, 24);
+    objectives.failed = [...failed, ...objectives.failed].slice(0, 24);
+    objectives.lastSummary =
+      `Objective resolution: ${succeeded.length} completed, ${failed.length} failed, ${remaining.length} carried forward. ` +
+      `Rewards ${formatCoin(rewardGold)} / +${rewardRep} rep, penalties ${formatCoin(penaltyGold)} / -${penaltyRep} rep.`;
+    return objectives.lastSummary;
+  }
+
+  function finalizeExecutionWeek(dayStats = {}) {
+    state.timeflow = createTimeflowRuntimeState(state.timeflow);
+    const boundaries = state.timeflow.boundaries;
+    const manager = getManagerState();
+    if (manager.phase !== MANAGER_PHASES.EXECUTION) {
+      return { weekClosed: false, summary: "" };
+    }
+    if (boundaries.lastWeekCloseWeek === manager.weekIndex && boundaries.lastWeekCloseAtDay === state.day) {
+      state.timeflow.diagnostics.guardRecoveries += 1;
+      return { weekClosed: false, summary: "Duplicate week close blocked by boundary guard." };
+    }
+    manager.dayInWeek += 1;
+    if (manager.dayInWeek <= MANAGER_WEEK_LENGTH) {
+      return { weekClosed: false, summary: "" };
+    }
+
+    const closeTransition = transitionManagerPhase(
+      MANAGER_PHASES.WEEK_CLOSE,
+      `Week ${manager.weekIndex} execution complete.`
+    );
+    if (!closeTransition.ok) {
+      return { weekClosed: false, summary: "" };
+    }
+
+    const postClose = getManagerState();
+    const summary =
+      `Week ${postClose.weekIndex} closed: last day ${Math.max(0, Math.round(Number(dayStats.guests) || 0))} guests, ` +
+      `net ${formatCoin(Math.round(Number(dayStats.net) || 0))}.`;
+    postClose.lastWeekSummary = summary;
+    const completedWeek = postClose.weekIndex;
+    boundaries.lastWeekCloseWeek = completedWeek;
+    boundaries.lastWeekCloseAtDay = state.day;
+    postClose.weekIndex += 1;
+    postClose.dayInWeek = 1;
+    const carryForwardPlan = postClose.committedPlan
+      ? { ...postClose.committedPlan, weekIndex: postClose.weekIndex }
+      : { ...postClose.planDraft, weekIndex: postClose.weekIndex };
+    postClose.planCommitted = false;
+    postClose.committedPlan = null;
+    postClose.planDraft = { ...carryForwardPlan };
+    postClose.supplyPlanner.weeklyBudgetCap = Math.max(0, Math.round(Number(carryForwardPlan.supplyBudgetCap) || 0));
+    postClose.supplyPlanner.spent = 0;
+    postClose.supplyPlanner.stockTargets = {};
+    postClose.supplyPlanner.lastAction = "Supply planner rolled into the next week and is awaiting plan commit.";
+    transitionManagerPhase(
+      MANAGER_PHASES.PLANNING,
+      `Week ${postClose.weekIndex} opened in planning mode after Week ${completedWeek} close.`,
+      { force: true }
+    );
+    state.clock = createSimulationClockState({ ...state.clock, speed: 0 });
+    const weekQueueResult = flushPlanningIntentQueue("week_start");
+    const objectiveSummary = evaluateObjectivesWeekBoundary();
+    refreshPlanningContext({ overwriteDraft: true });
+    if (postClose.recruitment.lastRefreshWeek !== postClose.weekIndex) {
+      refreshRecruitmentMarketForWeek(true);
+    }
+    if (postClose.objectives.active.length < 3) {
+      refreshObjectivesForWeek(false);
+    }
+    postClose.lastWeekSummary =
+      `${summary} ${objectiveSummary} Queue applied ${weekQueueResult.applied}, pending ${weekQueueResult.pending}. ` +
+      `Week ${postClose.weekIndex} is paused in planning mode until a plan is committed.`;
+    return { weekClosed: true, summary: postClose.lastWeekSummary };
+  }
+
   function spendGold(cost, reason) {
     if (state.gold < cost) {
       logLine(`Not enough gold for ${reason}.`, "bad");
@@ -2629,6 +4498,12 @@ let initialized = false;
   }
 
   function craft(label, consumes, outputs, extraGoldCost, dirtPenalty) {
+    const actionWindow = requireActionWindow("craft");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return;
+    }
     if (extraGoldCost > 0 && !spendGold(extraGoldCost, label)) {
       return;
     }
@@ -2668,6 +4543,12 @@ let initialized = false;
   }
 
   function hireRole(role, signingFee) {
+    const actionWindow = requireActionWindow("hire_role");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return;
+    }
     if (!spendGold(signingFee, `Hire ${role}`)) {
       return;
     }
@@ -2681,6 +4562,12 @@ let initialized = false;
   }
 
   function fireStaff(staffId) {
+    const actionWindow = requireActionWindow("fire_staff");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return;
+    }
     if (state.staff.length <= 1) {
       logLine("You cannot fire your only remaining staff member.", "bad");
       return;
@@ -2697,6 +4584,12 @@ let initialized = false;
   }
 
   function trainStaff() {
+    const actionWindow = requireActionWindow("train_staff");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return;
+    }
     if (!spendGold(28, "Train Staff")) {
       return;
     }
@@ -2722,27 +4615,59 @@ let initialized = false;
   }
 
   function runMarketing() {
+    const actionWindow = requireActionWindow("marketing");
+    if (!actionWindow.ok) {
+      logLine(actionWindow.error, "bad");
+      render();
+      return { ok: false, error: actionWindow.error };
+    }
+    const cadence = enforceActionCadence("marketing", { perMinute: true, perDay: true });
+    if (!cadence.ok) {
+      logLine(cadence.error, "bad");
+      render();
+      return { ok: false, error: cadence.error };
+    }
     if (!spendGold(32, "Marketing")) {
-      return;
+      return { ok: false, error: "Not enough gold for marketing." };
     }
     state.marketingDays = Math.max(state.marketingDays, 3);
     state.reputation = clamp(state.reputation + 1, 0, 100);
     logLine("Town crier campaign launched (+demand for 3 days).", "good");
     render();
+    return { ok: true, days: state.marketingDays };
   }
 
 function hostFestival() {
+  const actionWindow = requireActionWindow("festival");
+  if (!actionWindow.ok) {
+    logLine(actionWindow.error, "bad");
+    render();
+    return { ok: false, error: actionWindow.error };
+  }
+  const cadence = enforceActionCadence("festival", { perMinute: true, perWeek: true });
+  if (!cadence.ok) {
+    logLine(cadence.error, "bad");
+    render();
+    return { ok: false, error: cadence.error };
+  }
   if (!spendGold(50, "Minstrel Night")) {
-    return;
+    return { ok: false, error: "Not enough gold for minstrel night." };
   }
   state.festivalDays = Math.max(state.festivalDays, 2);
   state.cleanliness = clamp(state.cleanliness - 6, 0, 100);
   state.reputation = clamp(state.reputation + 2, 0, 100);
   logLine("Minstrel night booked (+demand for 2 days, more mess).", "good");
   render();
+  return { ok: true, days: state.festivalDays };
 }
 
 function deepClean() {
+  const actionWindow = requireActionWindow("deep_clean");
+  if (!actionWindow.ok) {
+    logLine(actionWindow.error, "bad");
+    render();
+    return;
+  }
   if (!spendGold(14, "Deep clean")) {
     return;
   }
@@ -2752,6 +4677,12 @@ function deepClean() {
 }
 
 function repairTavern() {
+  const actionWindow = requireActionWindow("repair_tavern");
+  if (!actionWindow.ok) {
+    logLine(actionWindow.error, "bad");
+    render();
+    return;
+  }
   if (!spendGold(40, "Repairs")) {
     return;
   }
@@ -2803,15 +4734,231 @@ function repairTavern() {
     });
   }
 
-  function advanceDay() {
+  function applyWeeklyStaffingPolicyBeforeDay(weekday) {
+    const manager = getManagerState();
+    const plan = manager.committedPlan && typeof manager.committedPlan === "object"
+      ? manager.committedPlan
+      : manager.planDraft;
+    const stats = getStaffStats();
+    const availableCount = state.staff.filter((person) => !isStaffUnavailable(person)).length;
+    const staffingIntent = `${plan.staffingIntent || "balanced"}`;
+
+    let coverageTarget = staffingIntent === "training_push" ? 3 : 2;
+    let plannedPreset = "balanced";
+    let qualityBoost = 0;
+    let demandMult = 1;
+    let fatigueRelief = 0;
+    let note = "Staffing policy held a balanced rota.";
+
+    if (staffingIntent === "rest_focus") {
+      plannedPreset = stats.avgFatigue >= 58 ? "day_heavy" : "balanced";
+      qualityBoost = 0;
+      fatigueRelief = 2;
+      note = "Rest-focus policy prioritized fatigue recovery and safer shifts.";
+    } else if (staffingIntent === "training_push") {
+      plannedPreset = weekday === "Fri" || weekday === "Sat" ? "balanced" : "night_heavy";
+      qualityBoost = 2;
+      fatigueRelief = 1;
+      note = "Training-push policy emphasized skill reps during service.";
+    } else {
+      plannedPreset = weekday === "Fri" || weekday === "Sat" ? "night_heavy" : "balanced";
+      qualityBoost = 1;
+      note = "Balanced policy flexed coverage for peak nights.";
+    }
+
+    if (availableCount < coverageTarget) {
+      plannedPreset = "balanced";
+      demandMult *= 0.92;
+      qualityBoost -= 1;
+      note = `Shortage contingency engaged (${availableCount}/${coverageTarget} available).`;
+    }
+
+    // Controlled variance keeps outcomes from feeling scripted while respecting weekly intent.
+    if (random.nextFloat() < 0.18) {
+      if (plannedPreset === "balanced") {
+        plannedPreset = staffingIntent === "rest_focus" ? "day_heavy" : "night_heavy";
+      } else {
+        plannedPreset = "balanced";
+      }
+      note += " Minor rota variance applied.";
+    }
+
+    state.rotaPreset = plannedPreset;
+
+    return {
+      staffingIntent,
+      coverageTarget,
+      availableCount,
+      plannedPreset,
+      qualityBoost,
+      demandMult,
+      fatigueRelief,
+      note
+    };
+  }
+
+  function buildSupplyTargetsForPlan(plan, suppliers) {
+    const procurementIntent = `${plan.procurementIntent || "stability"}`;
+    const volatility = Math.max(0, Math.round(Number(suppliers.volatility) || 0));
+    const base = procurementIntent === "quality"
+      ? { grain: 26, hops: 20, honey: 14, meat: 18, veg: 18, bread: 20, wood: 24 }
+      : procurementIntent === "cost_control"
+        ? { grain: 20, hops: 14, honey: 10, meat: 14, veg: 14, bread: 16, wood: 18 }
+        : { grain: 23, hops: 17, honey: 12, meat: 16, veg: 16, bread: 18, wood: 20 };
+    const volatilityBuffer = volatility >= 64 ? 4 : volatility >= 50 ? 2 : 0;
+    const caravanBoost = suppliers.caravan && suppliers.caravan.windowDays > 0 ? 2 : 0;
+    const wholesaleBoost = suppliers.contracts && suppliers.contracts.arcanumWholesaleDays > 0 ? 3 : 0;
+    return Object.fromEntries(
+      Object.entries(base).map(([item, amount]) => [
+        item,
+        amount + volatilityBuffer + caravanBoost + (item === "grain" || item === "hops" ? wholesaleBoost : 0)
+      ])
+    );
+  }
+
+  function applyMenuFallbackPolicy(plan) {
+    const policy = `${plan.menuFallbackPolicy || "substitute_first"}`;
+    const notes = [];
+
+    if (state.inventory.meat <= 6 || state.inventory.stew <= 6) {
+      const next = Math.max(6, state.prices.stew - 1);
+      if (next !== state.prices.stew) {
+        state.prices.stew = next;
+        notes.push("stew value fallback active");
+      }
+    }
+    if (state.inventory.honey <= 4 && state.inventory.mead <= 6) {
+      const next = Math.max(6, state.prices.mead - 1);
+      if (next !== state.prices.mead) {
+        state.prices.mead = next;
+        notes.push("mead substitute pricing active");
+      }
+    }
+    if (policy === "margin_guard" && state.inventory.ale <= 8) {
+      const next = Math.min(14, state.prices.ale + 1);
+      if (next !== state.prices.ale) {
+        state.prices.ale = next;
+        notes.push("ale margin guard active");
+      }
+    }
+
+    return notes.length > 0 ? `Menu fallback: ${notes.join(", ")}.` : "Menu fallback: no adjustments needed.";
+  }
+
+  function applyWeeklySupplyPlannerBeforeDay() {
+    const manager = getManagerState();
+    const plan = manager.committedPlan && typeof manager.committedPlan === "object"
+      ? manager.committedPlan
+      : manager.planDraft;
+    const suppliers = state.world.suppliers;
+    const planner = manager.supplyPlanner;
+    planner.weeklyBudgetCap = Math.max(0, Math.round(Number(plan.supplyBudgetCap) || planner.weeklyBudgetCap || 0));
+    planner.stockTargets = buildSupplyTargetsForPlan(plan, suppliers);
+
+    const unitCosts = {
+      grain: 5,
+      hops: 6,
+      honey: 9,
+      meat: 8,
+      veg: 5,
+      bread: 4,
+      wood: 4
+    };
+
+    const deficits = Object.entries(planner.stockTargets)
+      .map(([item, target]) => {
+        const current = Math.max(0, Math.round(Number(state.inventory[item]) || 0));
+        const reorderTrigger = Math.max(5, Math.round(target * 0.58));
+        const deficit = current < reorderTrigger ? target - current : 0;
+        return { item, target, current, reorderTrigger, deficit };
+      })
+      .filter((entry) => entry.deficit > 0)
+      .sort((a, b) => b.deficit - a.deficit);
+
+    const remainingBudget = Math.max(0, planner.weeklyBudgetCap - planner.spent);
+    let procurementNote = "Supply planner held position.";
+    if (deficits.length > 0 && remainingBudget > 0) {
+      const top = deficits[0];
+      const caravanBoost = suppliers.caravan.windowDays > 0 ? 2 : 0;
+      const contractBoost = suppliers.contracts.localBrokerDays > 0 ? 1 : 0;
+      const orderAmount = Math.max(1, Math.min(top.deficit, 5 + caravanBoost + contractBoost));
+      const beforeGold = state.gold;
+      const purchaseResult = buySupply(top.item, orderAmount, unitCosts[top.item] || 5, {
+        silent: true,
+        allowDuringBoundary: true
+      });
+      const spent = Math.max(0, beforeGold - state.gold);
+      planner.spent += spent;
+      if (purchaseResult && purchaseResult.ok) {
+        procurementNote =
+          `Supply planner ordered ${purchaseResult.amount} ${top.item} ` +
+          `(${formatCoin(spent)} used, ${formatCoin(Math.max(0, planner.weeklyBudgetCap - planner.spent))} budget left).`;
+      } else {
+        procurementNote =
+          `Supply planner attempted ${top.item} restock but order failed (${purchaseResult && purchaseResult.error ? purchaseResult.error : "unknown reason"}).`;
+      }
+    } else if (deficits.length > 0) {
+      procurementNote = "Supply planner paused reorders (weekly budget exhausted).";
+    }
+
+    const menuFallbackNote = applyMenuFallbackPolicy(plan);
+    planner.lastAction = `${procurementNote} ${menuFallbackNote}`;
+    return {
+      summary: planner.lastAction,
+      weeklyBudgetCap: planner.weeklyBudgetCap,
+      spent: planner.spent,
+      deficits
+    };
+  }
+
+  function advanceDay(options = {}) {
     normalizeWorldState();
-    const travelContext = progressDistrictTravel();
+    const trigger =
+      typeof options.trigger === "string" && TIMEFLOW_TRIGGER_PRECEDENCE.includes(options.trigger)
+        ? options.trigger
+        : "manual_skip";
+    const resolution = beginTimeflowResolution(trigger);
+    if (!resolution.ok) {
+      return { ok: false, error: resolution.error, phase: getManagerState().phase };
+    }
+    const boundaryOrder = [];
+    let resolutionSucceeded = false;
+    try {
+      const autoPrepareExecution = options.autoPrepareExecution !== false;
+      if (autoPrepareExecution) {
+        const ready = ensureExecutionPhaseForLiveSim("Live simulation prepared execution phase.");
+        if (!ready.ok) {
+          const reason = ready.error || "Unable to prepare execution phase.";
+          logLine(reason, "bad");
+          render();
+          return { ok: false, error: reason, phase: getManagerState().phase };
+        }
+      } else {
+        const manager = getManagerState();
+        if (manager.phase !== MANAGER_PHASES.EXECUTION || !manager.planCommitted || !manager.committedPlan) {
+          const reason =
+            manager.phase !== MANAGER_PHASES.EXECUTION
+              ? `Cannot advance day during ${manager.phase} phase. Commit the weekly plan first.`
+              : "Cannot advance day without a committed weekly plan.";
+          logLine(reason, "neutral");
+          render();
+          return { ok: false, error: reason, phase: manager.phase };
+        }
+      }
+      boundaryOrder.push("day_close");
+      const travelContext = progressDistrictTravel();
     const location = getActiveLocationProfile();
     const district = getCurrentDistrictProfile();
     state.day += 1;
-    const supplierSummary = progressSupplierNetwork();
+    const dayQueueResult = flushPlanningIntentQueue("day_start");
+    const timeline = refreshSeasonTimeline();
+    const supplierNetworkSummary = progressSupplierNetwork();
+    const supplyPlannerResult = applyWeeklySupplyPlannerBeforeDay();
+    const supplierSummary = `${supplierNetworkSummary} ${supplyPlannerResult.summary}`;
+    const recruitmentSummary = progressRecruitmentMarketDay();
     const rivalSummary = progressRivalTavernSimulation();
     const weekday = DAY_NAMES[(state.day - 1) % 7];
+    const staffingPlan = applyWeeklyStaffingPolicyBeforeDay(weekday);
     const absenceProgress = progressStaffAbsences();
     const spoilageSummary = applySupplySpoilage();
     const shiftContext = assignDailyShifts(weekday);
@@ -2825,6 +4972,8 @@ function repairTavern() {
     const actorHook = rollWorldActorEventHook();
     const worldMods = getWorldRuntimeModifiers();
     const mods = mergeDayMods(baseEventMods, actorHook.mods);
+    mods.qualityBoost += staffingPlan.qualityBoost;
+    mods.demandMult *= staffingPlan.demandMult;
     const kitchenContext = getProductionQualityContext();
     const rivalPriceBaselineMult = clamp(1 - worldMods.rivalPricePressure * 0.22, 0.78, 1.04);
 
@@ -2945,13 +5094,24 @@ function repairTavern() {
       }
     });
     const staffIncidentSummary = applyEndOfDayStaffEffects(shiftContext, satisfaction, net);
+    if (staffingPlan.fatigueRelief > 0) {
+      state.staff.forEach((person) => {
+        if (!isStaffUnavailable(person)) {
+          person.fatigue = clamp(person.fatigue - staffingPlan.fatigueRelief, 0, 100);
+        }
+      });
+    }
     state.lastReport = {
       loyaltyDemandMult,
       ...patronReport,
-      staffing: `${shiftContext.summary} Avg fatigue ${staffIncidentSummary.avgFatigue}.`,
+      staffing:
+        `${shiftContext.summary} ${staffingPlan.note} ` +
+        `Rota ${ROTA_PRESETS[state.rotaPreset].label}, coverage ${staffingPlan.availableCount}/${staffingPlan.coverageTarget}. ` +
+        `Avg fatigue ${staffIncidentSummary.avgFatigue}.`,
       supplies: spoilageSummary,
       supplierSummary,
       rivalSummary,
+      recruitmentSummary,
       kitchen: Math.round(kitchenContext.score),
       satisfaction: Math.round(satisfaction * 100),
       crownTax: crownTaxAccrued,
@@ -2977,6 +5137,14 @@ function repairTavern() {
       worldLayerSummary: state.lastReport.worldLayerSummary || "World layer updates pending for today.",
       weeklyWorldSummary: state.world.reporting.lastWeeklySummary
     };
+    state.lastReport.timeflowQueueSummary = state.timeflow ? state.timeflow.lastQueueSummary : "No queue summary.";
+    state.lastReport.seasonSummary = `Year ${timeline.year}, ${timeline.seasonLabel} week ${timeline.weekOfSeason}.`;
+    updateObjectiveProgressDaily({
+      compliance: state.lastReport.compliance,
+      satisfaction: state.lastReport.satisfaction,
+      net
+    });
+    state.lastReport.objectiveSummary = getManagerState().objectives.lastSummary;
 
     const repSwing = Math.round((satisfaction - 0.64) * 11);
     const rivalReputationDrag = Math.max(
@@ -3103,8 +5271,33 @@ function repairTavern() {
       `Day ${state.day} closed in ${district.label}: ${guests} guests, revenue ${formatCoin(revenue)}, crown accrued ${formatCoin(crownTaxAccrued)}, paid ${formatCoin(crownTaxPaid)}, net ${formatCoin(net)}.`,
       net >= 0 ? "good" : "bad"
     );
+    const cycleResult = finalizeExecutionWeek({ guests, net });
+    if (cycleResult.weekClosed) {
+      boundaryOrder.push("week_close");
+      logLine(cycleResult.summary, "neutral");
+      logLine("Weekly execution ended. Review planning board and commit the next week.", "neutral");
+    }
+    boundaryOrder.push("reporting_publish");
+
     resetProductionQualityContext();
     render();
+    resolutionSucceeded = true;
+    return {
+      ok: true,
+      day: state.day,
+      weekClosed: cycleResult.weekClosed,
+      phase: getManagerState().phase,
+      dayQueueResult
+    };
+    } finally {
+      endTimeflowResolution({
+        trigger,
+        boundaryOrder,
+        day: state.day,
+        boundaryKey: resolution.boundaryKey,
+        success: resolutionSucceeded
+      });
+    }
   }
 
   function demandByPrice(item, baseline) {
@@ -3205,25 +5398,83 @@ function saveGame() {
   };
 }
 
-function loadGame(snapshot) {
+function migrateSnapshotV0ToV1(snapshot) {
+  const input = snapshot && typeof snapshot === "object" ? snapshot : {};
+  return {
+    version: 1,
+    savedAt: typeof input.savedAt === "string" ? input.savedAt : new Date().toISOString(),
+    random: input.random && typeof input.random === "object"
+      ? input.random
+      : { mode: "system", seed: null, state: null },
+    state: input.state && typeof input.state === "object" ? input.state : null
+  };
+}
+
+function migrateSaveSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== "object") {
     return { ok: false, error: "Missing save payload." };
   }
-  if (snapshot.version !== SAVE_SCHEMA_VERSION) {
+  let working = cloneData(snapshot);
+  let version = Number.isInteger(working.version) ? working.version : 0;
+  if (version > SAVE_SCHEMA_VERSION) {
     return {
       ok: false,
-      error: `Save version ${snapshot.version} is not compatible with ${SAVE_SCHEMA_VERSION}.`
+      error: `Save version ${version} is newer than supported schema ${SAVE_SCHEMA_VERSION}.`
     };
   }
+  const migrations = [];
+  while (version < SAVE_SCHEMA_VERSION) {
+    if (version === 0) {
+      working = migrateSnapshotV0ToV1(working);
+      migrations.push("0->1");
+      version = 1;
+      continue;
+    }
+    return {
+      ok: false,
+      error: `No migration path from save version ${version} to ${SAVE_SCHEMA_VERSION}.`
+    };
+  }
+  if (!working.state || typeof working.state !== "object") {
+    return { ok: false, error: "Save payload is missing state data." };
+  }
+  if (!working.random || typeof working.random !== "object") {
+    working.random = { mode: "system", seed: null, state: null };
+  }
+  working.version = SAVE_SCHEMA_VERSION;
+  return { ok: true, snapshot: working, migrations };
+}
 
-  const merged = mergeWithTemplate(stateTemplate, snapshot.state);
+function loadGame(snapshot) {
+  const migrated = migrateSaveSnapshot(snapshot);
+  if (!migrated.ok) {
+    return { ok: false, error: migrated.error };
+  }
+  const payload = migrated.snapshot;
+  const missingManagerState = !(payload.state && typeof payload.state === "object" && payload.state.manager);
+  const missingTimeflowState = !(payload.state && typeof payload.state === "object" && payload.state.timeflow);
+  const merged = mergeWithTemplate(stateTemplate, payload.state);
   applyStateSnapshot(merged);
   normalizeWorldState();
-  random.restore(snapshot.random);
+  if (missingManagerState) {
+    refreshPlanningContext({ overwriteDraft: true });
+    refreshRecruitmentMarketForWeek(true);
+    refreshObjectivesForWeek(true);
+  }
+  if (missingTimeflowState) {
+    state.timeflow = createTimeflowRuntimeState(state.timeflow);
+  }
+  random.restore(payload.random);
   initialized = true;
-  logLine(`Loaded campaign snapshot (Day ${state.day}).`, "neutral");
   render();
-  return { ok: true };
+  return {
+    ok: true,
+    migrations: migrated.migrations,
+    rehydrated: {
+      manager: missingManagerState,
+      timeflow: missingTimeflowState
+    }
+  };
 }
 
 function setRandomSeed(seedLike) {
@@ -3324,11 +5575,27 @@ function initGame() {
   normalizeWorldState();
   const location = getActiveLocationProfile();
   const district = getCurrentDistrictProfile();
+  const timeline = refreshSeasonTimeline();
+  const planningGuidance = refreshPlanningContext({ overwriteDraft: true });
+  const recruitmentSummary = refreshRecruitmentMarketForWeek(true);
+  const objectiveSummary = refreshObjectivesForWeek(true);
+  const executionReady = ensureExecutionPhaseForLiveSim("Campaign opened in live execution mode.");
+  const manager = getManagerState();
   initialized = true;
   logLine(`Tavern charter signed in ${location.label} (${location.title}).`, "neutral");
   logLine(`Operating district: ${district.label}.`, "neutral");
   logLine(`Influence watch: ${summarizeWorldActorsForReport()}`, "neutral");
   logLine(location.summary, "neutral");
+  logLine(`Manager loop ready: Week ${manager.weekIndex} is in ${manager.phase} phase.`, "neutral");
+  logLine(`Timeline: Year ${timeline.year}, ${timeline.seasonLabel} week ${timeline.weekOfSeason}.`, "neutral");
+  logLine(`Planning context synced from world layer: ${planningGuidance.summary}`, "neutral");
+  logLine(`Recruitment board: ${recruitmentSummary}`, "neutral");
+  logLine(`Objective board: ${objectiveSummary}`, "neutral");
+  if (!executionReady.ok) {
+    logLine(`Live execution warning: ${executionReady.error}`, "bad");
+  } else {
+    logLine("Live simulation is ready. Use Pause, Play, Fast x2, or Fast x4.", "good");
+  }
   logLine("Tip: keep ale and stew stocked before Fridays and Saturdays.", "neutral");
   logLine("Tip: loyal patrons boost future demand. Watch the daily report.", "neutral");
   logLine("Tip: fatigue builds over time. Use rota presets to protect your staff.", "neutral");
@@ -3346,6 +5613,11 @@ export {
   getRivalStatus,
   getWorldReputationStatus,
   getWorldLayerStatus,
+  getTimeflowContractStatus,
+  getTimeflowDiagnostics,
+  getManagerPhaseStatus,
+  getManagerLayerStatus,
+  getSimulationClockStatus,
   listTravelOptions,
   PRICE_DEFAULTS,
   ROTA_PRESETS,
@@ -3364,6 +5636,11 @@ export {
   loadScenario,
   getStaffStats,
   setRotaPreset,
+  updateWeeklyPlanDraft,
+  commitWeeklyPlan,
+  shortlistRecruitCandidate,
+  scoutRecruitCandidate,
+  signRecruitCandidate,
   startDistrictTravel,
   fileComplianceReport,
   settleCrownArrears,
@@ -3378,6 +5655,9 @@ export {
   trainStaff,
   runMarketing,
   hostFestival,
+  setTimeflowParityStatus,
+  setSimulationSpeed,
+  advanceSimulationMinutes,
   deepClean,
   repairTavern,
   advanceDay

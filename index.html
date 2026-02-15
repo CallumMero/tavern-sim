@@ -98,11 +98,71 @@
           </div>
         </div>
 
+        <div class="group">
+          <h3>Simulation Clock</h3>
+          <div id="clockStatusView" class="report-list compact"></div>
+          <div class="group inline">
+            <button id="pauseSimBtn">Pause</button>
+            <button id="playSimBtn">Play</button>
+            <button id="fast2SimBtn">Fast Forward x2</button>
+            <button id="fast4SimBtn">Fast Forward x4</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>Weekly Planning Board</h3>
+          <div id="planningStatusView" class="report-list compact"></div>
+          <label for="planStaffingSelect" class="field-label">Staffing Intent</label>
+          <select id="planStaffingSelect">
+            <option value="balanced">Balanced</option>
+            <option value="rest_focus">Rest Focus</option>
+            <option value="training_push">Training Push</option>
+          </select>
+          <label for="planPricingSelect" class="field-label">Pricing Intent</label>
+          <select id="planPricingSelect">
+            <option value="value">Value</option>
+            <option value="balanced">Balanced</option>
+            <option value="premium">Premium</option>
+          </select>
+          <label for="planProcurementSelect" class="field-label">Procurement Intent</label>
+          <select id="planProcurementSelect">
+            <option value="stability">Stability</option>
+            <option value="quality">Quality</option>
+            <option value="cost_control">Cost Control</option>
+          </select>
+          <label for="planMarketingSelect" class="field-label">Marketing Intent</label>
+          <select id="planMarketingSelect">
+            <option value="steady">Steady</option>
+            <option value="growth">Growth</option>
+            <option value="campaign">Campaign</option>
+          </select>
+          <label for="planLogisticsSelect" class="field-label">Logistics Intent</label>
+          <select id="planLogisticsSelect">
+            <option value="local">Local</option>
+            <option value="caravan_watch">Caravan Watch</option>
+            <option value="city_push">City Push</option>
+          </select>
+          <label for="planRiskSelect" class="field-label">Risk Tolerance</label>
+          <select id="planRiskSelect">
+            <option value="low">Low</option>
+            <option value="moderate">Moderate</option>
+            <option value="high">High</option>
+          </select>
+          <label for="planReserveInput" class="field-label">Reserve Gold Target</label>
+          <input id="planReserveInput" type="number" min="0" step="1" value="100">
+          <label for="planNoteInput" class="field-label">Planning Note</label>
+          <input id="planNoteInput" type="text" maxlength="140" placeholder="Week focus">
+          <div class="group inline">
+            <button id="updatePlanDraftBtn">Update Weekly Draft</button>
+            <button id="commitPlanBtn">Commit Weekly Plan</button>
+          </div>
+        </div>
+
         <div class="group inline">
           <button id="trainBtn">Train Staff</button>
           <button id="marketingBtn">Run Marketing</button>
           <button id="festivalBtn">Host Minstrel Night</button>
-          <button id="nextDayBtn" class="primary">Advance Day</button>
+          <button id="nextDayBtn" class="primary">Skip To Next Day</button>
         </div>
 
         <h3>Daily Reports</h3>

@@ -256,6 +256,14 @@ button.primary {
   font-weight: bold;
 }
 
+button.active-speed {
+  border-color: #c18a42;
+  background: linear-gradient(180deg, #d7a255, #bc8138 58%, #9c692f 100%);
+  color: #1d1008;
+  text-shadow: none;
+  font-weight: bold;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

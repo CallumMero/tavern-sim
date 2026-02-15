@@ -92,12 +92,12 @@ Milestone 2 implementation steps:
 
 Milestone 2 exit criteria:
 
-- A new campaign start always asks for one of two opening locations and applies distinct early-game economics/events/supply constraints.
-- District map, rival taverns, and local power groups are simulated entities, not flavor text only.
-- Crown tax enforcement and compliance meaningfully affect finances and event outcomes.
-- Supplier access and logistics choices materially change stock reliability, cost, and menu strategy.
-- Reputation is split by cohort and governance context (Crown + local power groups).
-- All required M2 data is visible in reports and persisted cleanly so Milestone 3 can begin immediately.
+- [x] A new campaign start always asks for one of two opening locations and applies distinct early-game economics/events/supply constraints.
+- [x] District map, rival taverns, and local power groups are simulated entities, not flavor text only.
+- [x] Crown tax enforcement and compliance meaningfully affect finances and event outcomes.
+- [x] Supplier access and logistics choices materially change stock reliability, cost, and menu strategy.
+- [x] Reputation is split by cohort and governance context (Crown + local power groups).
+- [x] All required M2 data is visible in reports and persisted cleanly so Milestone 3 can begin immediately.
 
 ### Milestone 3: Manager Gameplay Loop
 
@@ -105,6 +105,186 @@ Milestone 2 exit criteria:
 - Recruitment market with traits, potential, and hidden personality
 - Long-term objectives from Crown offices, noble houses, merchant interests, and investors
 - Save/load campaign state with seasonal progression
+
+Milestone 3 implementation steps:
+
+1. Implement weekly phase flow and state boundaries:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - explicit `planning` -> `execution` -> `week_close` phases with deterministic transitions.
+   - planning locks/commit rules so changes only apply at intended times.
+   - phase invariant guards and recovery behavior for invalid transitions (no phase drift under load/save/resume paths).
+2. Build weekly planning board surfaces:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - planning controls for staffing intent, pricing intent, procurement intent, marketing intent, and district/logistics intent.
+   - clear summary panel of committed plan before week execution begins.
+   - budget/risk envelope checks at commit time so impossible plans are blocked with actionable feedback.
+3. Consume M2 world-layer handoff contract directly in weekly planning:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - planning input uses location profile, taxes/compliance, event outlook, supplier/logistics state, rival pressure, and reputation standings from `worldLayer()`.
+   - no duplicate bridge state between M2 systems and M3 planners.
+4. Implement staffing planner + execution policy:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - role coverage targets, fatigue-risk controls, training/rest priorities, and shortage contingencies.
+   - day-level shift assignment references weekly plan with controlled variance.
+5. Implement supply/menu operations planner:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - weekly stock targets by product chain, budget caps, reorder triggers, and fallback substitutions.
+   - plan reacts to forecast volatility, caravan windows, and contract states.
+6. Implement recruitment market generation and lifecycle:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - weekly candidate pool with role fit, visible traits, hidden personality flags, potential range, and wage expectations.
+   - shortlist/interview/hire flow with uncertainty and scouting-quality effects.
+   - candidate churn/expiry and competing-offer pressure so waiting has meaningful opportunity cost.
+7. Implement objective generation and tracking:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - medium/long arcs from Crown offices, noble houses, merchant interests, and investors.
+   - objective timers, success/failure states, and reward/penalty payloads.
+8. Integrate objectives into weekly and daily outcomes:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - plan and execution decisions move objective progress each day/week.
+   - objective outcomes feed finances, reputation surfaces, actor standings, and compliance pressure.
+9. Implement seasonal timeline progression:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - week indexing, season rollover effects, and objective/recruitment refresh cadence.
+   - timeline cues surfaced in reports and planning screens.
+   - seasonal modifiers propagate into event outlook and weekly planning assumptions.
+10. Extend persistence boundaries for M3 systems:
+    - [x] Implementation complete
+    - [x] Validation complete
+    - save/load coverage for phase state, weekly plans, recruitment market, objectives, and seasonal timeline.
+    - backwards-safe loading for older snapshots where possible.
+11. Add M3 reporting, diagnostics, and regression fixtures:
+    - [x] Implementation complete
+    - [x] Validation complete
+    - daily/weekly report lines for planning adherence, recruitment pipeline, objective progress, and seasonal status.
+    - debug surfaces/API expose current phase, committed plan payload, objective timeline, and recruitment uncertainty state.
+    - scenario regressions verify determinism and cohesion between M2 world state and M3 manager loop.
+12. Lock M3 -> M4 handoff contract:
+    - [x] Implementation complete
+    - [x] Validation complete
+    - M4 managerial UI surfaces (delegation, analytics, scouting, and command-board style updates) consume stable M3 outputs directly (weekly plans, staffing decisions, recruitment intel, objective timeline) with no bridge sprint required.
+
+Milestone 3 exit criteria:
+
+- [x] A campaign week always begins in planning mode, commits a plan, and executes day-by-day without phase drift.
+- [x] Recruitment market supports uncertain talent discovery (visible vs hidden info) and meaningful hiring tradeoffs.
+- [x] Multi-week objectives from Crown/noble/merchant/investor lines are active, trackable, and consequential.
+- [x] Seasonal progression updates weekly systems (events, objectives, recruitment cadence) coherently.
+- [x] Save/load fully restores M3 phase state and all manager-loop entities without corruption.
+- [x] Reports and debug surfaces expose enough information to start Milestone 4 without additional integration work.
+
+### Milestone 3.5: Hybrid Timeflow (Planning + Live + Skip)
+
+- Keep strategic planning depth while running a live simulation clock
+- Support time controls: `Pause`, `Play`, `Fast x2`, `Fast x4`
+- Keep a manual `Skip To Next Day` option for fast-forward management play
+- Ensure live progression and skip progression are deterministic/cohesive under the same inputs
+
+Milestone 3.5 implementation steps:
+
+1. Specify the Hybrid Timeflow contract and precedence rules:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - define canonical units (`minute`, `day`, `week`) and exact boundary order: minute tick -> day close -> week close -> reporting publish.
+   - define source-of-truth ownership (`clock`, `manager phase`, `day resolver`) so no dual authority exists.
+   - define conflict precedence when multiple triggers occur on same tick (manual skip, midnight rollover, week boundary).
+2. Implement the simulation clock core as a deterministic state machine:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - support `Pause`, `Play`, `Fast x2`, `Fast x4` as explicit enumerated modes.
+   - enforce one simulation ticker authority and prevent duplicate timer loops.
+   - guarantee that speed affects only time progression rate, not probability rolls or event weighting.
+3. Create a single canonical day-resolution pipeline:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - centralize daily execution into one resolver entry point (economy, staffing, events, suppliers, objectives, reports).
+   - remove any alternate branch that can bypass subsystem ordering.
+   - define idempotency guard so the same day cannot resolve twice.
+4. Bind `Skip To Next Day` to the canonical resolver:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - skip action must advance to next day boundary through the exact same resolver and ordering as live midnight rollover.
+   - ensure skip while paused/running has deterministic and documented behavior.
+   - lock input during skip execution to avoid partial-state edits mid-resolution.
+5. Define planning effect timing windows:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - classify each planning field as `instant`, `next_day`, or `next_week`.
+   - publish a timing matrix in code/docs so players know when each change applies.
+   - reject or queue edits that violate timing constraints for current boundary state.
+6. Implement queued intent application with boundary metadata:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - add intent queue entries with `created_at`, `effective_boundary`, `priority`, and `source`.
+   - resolve queued intents deterministically at boundary start before simulation effects.
+   - log applied/expired/rejected intents for replay/debug visibility.
+7. Add exploit protection and cadence gating:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - enforce cooldowns/locks on high-impact actions (marketing bursts, festival chaining, contract flipping, repeated travel toggles).
+   - prevent action spam inside a single in-game minute or during boundary resolution.
+   - ensure gating is symmetric in live mode and skip mode.
+8. Harden weekly rollover in continuous live flow:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - carry a safe default plan into new week while preserving planning agency.
+   - ensure recruitment refresh, objective refresh, and seasonal hooks fire exactly once per week boundary.
+   - prevent week-close phase drift when crossing midnight at different speed settings.
+9. Build hybrid UX surfaces and wording clarity:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - label controls clearly (`Pause`, `Play`, `Fast x2`, `Fast x4`, `Skip To Next Day`).
+   - show current clock state, active speed, pending intents, and next application boundary.
+   - display planning timing hints directly in planning controls (instant/next day/next week).
+10. Add deterministic parity and speed-invariance tests:
+    - [x] Implementation complete
+    - [x] Validation complete
+    - live-vs-skip parity tests for identical seed + inputs over N-day windows.
+    - speed parity tests (`Play` vs `x2` vs `x4`) verifying identical day-close outputs.
+    - include edge tests around midnight, week rollover, and queued-intent collisions.
+11. Extend persistence and migration boundaries:
+    - [x] Implementation complete
+    - [x] Validation complete
+    - persist clock state, speed mode, queue contents, boundary locks, and last-resolved boundary markers.
+    - add migration path for older saves missing hybrid timeflow fields.
+    - validate resume behavior mid-day, mid-week, and immediately before boundary transitions.
+12. Add timeflow observability, diagnostics, and recovery guards:
+    - [x] Implementation complete
+    - [x] Validation complete
+    - expose debug APIs for clock snapshot, queue snapshot, last boundary trace, and parity status.
+    - add report lines for recent boundary applications and any guard-triggered recoveries.
+    - define safe fallback behavior when invalid transition/duplicate resolution is detected.
+
+Milestone 3.5 exit criteria:
+
+- [x] Planning remains meaningful and cannot be bypassed by live-speed or skip exploits.
+- [x] `Pause`, `Play`, `Fast x2`, and `Fast x4` are stable and do not desync daily/weekly systems.
+- [x] `Skip To Next Day` resolves through the same logic path as live rollover and remains deterministic.
+- [x] Mid-day edits apply exactly at documented boundaries with no hidden timing surprises.
+- [x] Save/load restores hybrid timeflow state cleanly (clock, queued intents, week/day boundary context).
+- [x] Reports/debug surfaces make timeflow behavior auditable before Milestone 4.
+
+### Debug: Stabilization Backlog
+
+- [x] Legacy guild terminology still appears in gameplay config/visual text (`guild_inspector` keys and "guild quarter" wording) and conflicts with the Crown-based Calvador world model.
+- [x] Save/load phase fidelity issue: `loadGame()` currently forces live execution readiness, which can override a deliberately saved planning-phase state.
+- [x] Save/load idempotency issue: loading a snapshot mutates state/log output (extra log entry and live-resume side effects) instead of restoring a clean exact snapshot.
+- [x] Timeflow retry issue: duplicate-boundary guard uses `lastBoundaryKey` in a way that can block same-minute retries after a failed boundary attempt.
+- [x] Weekly loop planning-window issue: week close currently force-transitions back to execution with carried plan, leaving no explicit planning pause window at week start.
+- [x] UI location-state mismatch: campaign setup selector syncs to `startingLocation` rather than current `activeLocation`, so the UI can show stale location context after travel.
+- [x] Boundary input lock coverage is partial: several gameplay actions are not hard-blocked at UI/engine level during boundary resolution windows.
+- [x] Save migration gap: loader hard-fails on non-current schema versions instead of routing through explicit versioned migrations.
+- [x] Documentation drift: `README.md` still contains machine-specific asset path text and no longer-matching world terminology.
+- [x] Regression gap: no dedicated automated check currently asserts all of the above (especially load exactness, boundary retry behavior, and full action-lock coverage).
 
 ### Milestone 4: Football Manager Style Tooling
 
