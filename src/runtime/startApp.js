@@ -180,6 +180,10 @@ export function startApp() {
     },
     showMenu: (view = "main_menu") => ui.showMenu(view),
     enterGame: () => ui.enterGame(),
+    uiRoutes: () => ui.routeIds(),
+    uiHandoff: () => ui.handoffContract(),
+    uiView: () => ui.getInGameView(),
+    setUiView: (viewId = "command") => ui.setInGameView(viewId),
     settings: () => ui.getSettings(),
     setSettings: (nextSettings = {}) => {
       const stored = settingsStore.save(nextSettings);

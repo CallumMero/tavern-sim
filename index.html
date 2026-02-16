@@ -85,10 +85,22 @@
       <div class="top-stats" id="topStats"></div>
     </header>
 
+    <section class="in-game-nav panel" id="inGameNav" aria-label="In-Game Navigation">
+      <button data-ui-route="command" class="primary">Command</button>
+      <button data-ui-route="operations">Operations</button>
+      <button data-ui-route="staff">Staff</button>
+      <button data-ui-route="world">World</button>
+      <button data-ui-route="analytics">Analytics</button>
+      <button data-ui-route="reports">Reports</button>
+      <p class="nav-shortcuts" aria-label="Keyboard shortcuts">Shortcuts: Alt+1..6 views, [ and ] cycle, P pause/play, N next day, / report search.</p>
+    </section>
+
+    <section class="alert-strip panel" id="alertStrip" aria-live="polite"></section>
+
     <section class="grid">
       <aside class="panel col left">
-        <h2>Operations</h2>
-        <div class="group">
+        <h2 data-ui-view="operations,world,staff">Operations</h2>
+        <div class="group" data-ui-view="operations" data-collapsible="true" data-collapsed="true">
           <h3>Campaign Setup</h3>
           <label for="startLocationSelect" class="field-label">Opening Location</label>
           <select id="startLocationSelect"></select>
@@ -97,30 +109,33 @@
           <button id="startCampaignBtn">Start New Campaign</button>
         </div>
 
-        <div class="group">
+        <div class="group" data-ui-view="world,operations" data-collapsible="true">
           <h3>District Travel</h3>
           <div id="districtStatusView" class="report-list compact"></div>
           <label for="travelDestinationSelect" class="field-label">Travel Destination</label>
-          <select id="travelDestinationSelect"></select>
-          <button id="travelBtn">Begin District Travel</button>
+          <select id="travelDestinationSelect" title="Choose a district route; travel can delay local actions until arrival."></select>
+          <p class="field-help">Travel trades immediate action speed for district-specific opportunities.</p>
+          <button id="travelBtn" title="Start travel to the selected district and apply transit timing rules.">Begin District Travel</button>
         </div>
 
-        <div class="group">
+        <div class="group" data-ui-view="world,command" data-collapsible="true">
           <h3>Crown Compliance</h3>
           <div id="crownStatusView" class="report-list compact"></div>
-          <button id="fileComplianceBtn">File Voluntary Report</button>
-          <button id="settleArrearsBtn">Settle Crown Arrears</button>
+          <p class="field-help">Compliance reduces audit risk; arrears can trigger penalties and pressure events.</p>
+          <button id="fileComplianceBtn" title="File a voluntary compliance report to improve Crown standing.">File Voluntary Report</button>
+          <button id="settleArrearsBtn" title="Pay outstanding Crown arrears to reduce enforcement pressure.">Settle Crown Arrears</button>
         </div>
 
-        <div class="group">
+        <div class="group" data-ui-view="operations,world,command" data-collapsible="true">
           <h3>Supplier Network</h3>
           <div id="supplierStatusView" class="report-list compact"></div>
-          <button id="signLocalContractBtn">Sign Local Broker Contract</button>
-          <button id="signWholesaleContractBtn">Sign Arcanum Wholesale Contract</button>
-          <button id="stockRunBtn">Dispatch City Stock-Up Run</button>
+          <p class="field-help">Contracts and stock runs change reliability, costs, and menu flexibility.</p>
+          <button id="signLocalContractBtn" title="Secure short-horizon local reliability; suited for tight village supply.">Sign Local Broker Contract</button>
+          <button id="signWholesaleContractBtn" title="Secure city-scale wholesale flow with larger commitment and cadence.">Sign Arcanum Wholesale Contract</button>
+          <button id="stockRunBtn" title="Dispatch a one-off city stock-up trip; delivery lands after travel time.">Dispatch City Stock-Up Run</button>
         </div>
 
-        <div class="group">
+        <div class="group" data-ui-view="operations" data-collapsible="true">
           <h3>Production</h3>
           <button id="brewAleBtn">Brew Ale</button>
           <button id="brewMeadBtn">Brew Mead</button>
@@ -129,7 +144,7 @@
           <button id="repairBtn">Repair Tavern</button>
         </div>
 
-        <div class="group">
+        <div class="group" data-ui-view="operations" data-collapsible="true">
           <h3>Supplies</h3>
           <button id="buyGrainBtn">Buy Grain</button>
           <button id="buyHopsBtn">Buy Hops</button>
@@ -142,9 +157,9 @@
       </aside>
 
       <section class="panel col center">
-        <h2>Ledger And Control</h2>
+        <h2 data-ui-view="command,operations,reports,analytics">Ledger And Control</h2>
 
-        <div class="scene-shell">
+        <div class="scene-shell" data-ui-view="command,operations,analytics,world">
           <canvas
             id="sceneCanvas"
             width="320"
@@ -155,7 +170,7 @@
           <p class="scene-caption">Live pixel preview driven by the simulation engine.</p>
         </div>
 
-        <div class="summary-grid">
+        <div class="summary-grid" data-ui-view="command,operations,analytics">
           <div>
             <h3>Inventory</h3>
             <div id="inventoryView" class="kv-list"></div>
@@ -166,93 +181,117 @@
           </div>
         </div>
 
-        <div class="group">
+        <div class="group" data-ui-view="command,operations">
           <h3>Simulation Clock</h3>
           <div id="clockStatusView" class="report-list compact"></div>
-          <div class="group inline">
-            <button id="pauseSimBtn">Pause</button>
-            <button id="playSimBtn">Play</button>
-            <button id="fast2SimBtn">Fast Forward x2</button>
-            <button id="fast4SimBtn">Fast Forward x4</button>
+          <div class="group inline action-row">
+            <button id="pauseSimBtn" title="Stop time progression while keeping menus interactive.">Pause</button>
+            <button id="playSimBtn" title="Run simulation at standard speed (1 real second = 1 in-game minute).">Play</button>
+            <button id="fast2SimBtn" title="Run simulation at double speed.">Fast Forward x2</button>
+            <button id="fast4SimBtn" title="Run simulation at quadruple speed.">Fast Forward x4</button>
           </div>
         </div>
 
-        <div class="group">
+        <div class="group" data-ui-view="command,operations" data-collapsible="true">
           <h3>Weekly Planning Board</h3>
           <div id="planningStatusView" class="report-list compact"></div>
-          <label for="planStaffingSelect" class="field-label">Staffing Intent</label>
-          <select id="planStaffingSelect">
+          <label for="planStaffingSelect" class="field-label">Intent: Staffing</label>
+          <select id="planStaffingSelect" title="Sets weekly staff posture between stability, rest recovery, and development push.">
             <option value="balanced">Balanced</option>
             <option value="rest_focus">Rest Focus</option>
             <option value="training_push">Training Push</option>
           </select>
-          <label for="planPricingSelect" class="field-label">Pricing Intent</label>
-          <select id="planPricingSelect">
+          <p class="field-help">Applies at boundary windows; immediate changes may be queued for next day/week.</p>
+          <label for="planPricingSelect" class="field-label">Intent: Pricing</label>
+          <select id="planPricingSelect" title="Sets baseline pricing posture for demand vs margin strategy.">
             <option value="value">Value</option>
             <option value="balanced">Balanced</option>
             <option value="premium">Premium</option>
           </select>
-          <label for="planProcurementSelect" class="field-label">Procurement Intent</label>
-          <select id="planProcurementSelect">
+          <label for="planProcurementSelect" class="field-label">Intent: Procurement</label>
+          <select id="planProcurementSelect" title="Balances reliability, quality, and gold efficiency in supply acquisition.">
             <option value="stability">Stability</option>
             <option value="quality">Quality</option>
             <option value="cost_control">Cost Control</option>
           </select>
-          <label for="planMarketingSelect" class="field-label">Marketing Intent</label>
-          <select id="planMarketingSelect">
+          <label for="planMarketingSelect" class="field-label">Intent: Marketing</label>
+          <select id="planMarketingSelect" title="Controls guest growth pressure and campaign intensity over time.">
             <option value="steady">Steady</option>
             <option value="growth">Growth</option>
             <option value="campaign">Campaign</option>
           </select>
-          <label for="planLogisticsSelect" class="field-label">Logistics Intent</label>
-          <select id="planLogisticsSelect">
+          <label for="planLogisticsSelect" class="field-label">Intent: Logistics</label>
+          <select id="planLogisticsSelect" title="Defines travel/sourcing stance between local flow and city push.">
             <option value="local">Local</option>
             <option value="caravan_watch">Caravan Watch</option>
             <option value="city_push">City Push</option>
           </select>
-          <label for="planRiskSelect" class="field-label">Risk Tolerance</label>
-          <select id="planRiskSelect">
+          <label for="planRiskSelect" class="field-label">Intent: Risk Tolerance</label>
+          <select id="planRiskSelect" title="Higher risk allows aggressive plans with higher volatility exposure.">
             <option value="low">Low</option>
             <option value="moderate">Moderate</option>
             <option value="high">High</option>
           </select>
-          <label for="planReserveInput" class="field-label">Reserve Gold Target</label>
-          <input id="planReserveInput" type="number" min="0" step="1" value="100">
+          <label for="planReserveInput" class="field-label">Target: Reserve Gold</label>
+          <input id="planReserveInput" type="number" min="0" step="1" value="100" title="Minimum gold buffer to protect against bad event chains and tax pressure.">
+          <p class="field-help">Reserve target and risk tolerance work together to define your safety margin.</p>
           <label for="planNoteInput" class="field-label">Planning Note</label>
-          <input id="planNoteInput" type="text" maxlength="140" placeholder="Week focus">
-          <div class="group inline">
-            <button id="updatePlanDraftBtn">Update Weekly Draft</button>
-            <button id="commitPlanBtn">Commit Weekly Plan</button>
+          <input id="planNoteInput" type="text" maxlength="140" placeholder="Week focus" title="Short internal note to remember this week's strategic intent.">
+          <div class="group inline action-row">
+            <button id="updatePlanDraftBtn" title="Save current planning choices to the draft without locking execution.">Update Weekly Draft</button>
+            <button id="commitPlanBtn" title="Lock this week's plan so execution can proceed under the committed settings.">Commit Weekly Plan</button>
           </div>
         </div>
 
-        <div class="group">
+        <div class="group" data-ui-view="command">
           <h3>Command Board</h3>
           <div id="commandBoardView" class="report-list compact"></div>
         </div>
 
-        <div class="group">
+        <div class="group" data-ui-view="command,staff" data-collapsible="true" data-collapsed="true">
           <h3>Delegation Desk</h3>
           <div id="delegationView" class="report-list compact"></div>
         </div>
 
-        <div class="group inline">
-          <button id="trainBtn">Train Staff</button>
-          <button id="marketingBtn">Run Marketing</button>
-          <button id="festivalBtn">Host Minstrel Night</button>
-          <button id="nextDayBtn" class="primary">Skip To Next Day</button>
+        <div class="group inline action-row" data-ui-view="command,operations,staff">
+          <button id="trainBtn" title="Improve staff quality over time at immediate morale/fatigue tradeoffs.">Train Staff</button>
+          <button id="marketingBtn" title="Spend gold now to increase demand pressure in upcoming periods.">Run Marketing</button>
+          <button id="festivalBtn" title="Host an event night to boost traffic and variance.">Host Minstrel Night</button>
+          <button id="nextDayBtn" class="primary" title="Resolve the rest of the current day immediately through the canonical day pipeline.">Skip To Next Day</button>
         </div>
 
-        <h3>Daily Reports</h3>
-        <div id="reportView" class="report-list"></div>
-
-        <h3>Daily Log</h3>
-        <div id="logView" class="log"></div>
+        <div class="group" data-ui-view="reports,command" data-collapsible="true">
+          <h3>Report Console</h3>
+          <div class="group inline report-tabs">
+            <button id="reportTabDailyBtn" data-report-tab="daily" class="primary">Daily Report</button>
+            <button id="reportTabWeeklyBtn" data-report-tab="weekly">Weekly Summary</button>
+            <button id="reportTabLogBtn" data-report-tab="log">Event Log</button>
+          </div>
+          <div class="report-toolbar">
+            <label for="reportFilterInput" class="field-label">Search Reports And Log</label>
+            <input id="reportFilterInput" type="text" placeholder="Search terms (e.g. crown supply rival)">
+          </div>
+          <p class="field-help">Search supports multi-term matching across daily, weekly, and log surfaces.</p>
+          <div id="reportDailySummaryView" class="report-kpi-grid"></div>
+          <div id="reportWeeklyView" class="report-list hidden"></div>
+          <div id="reportView" class="report-list"></div>
+          <div class="log-toolbar" id="logToolbar">
+            <label for="logToneSelect" class="field-label">Log Tone</label>
+            <select id="logToneSelect" title="Filter raw event log to critical, neutral, or positive entries.">
+              <option value="all">All</option>
+              <option value="bad">Critical/Bad</option>
+              <option value="neutral">Neutral</option>
+              <option value="good">Good</option>
+            </select>
+          </div>
+          <div id="reportLogSummaryView" class="report-list compact hidden"></div>
+          <div id="logView" class="log hidden"></div>
+        </div>
       </section>
 
       <aside class="panel col right">
-        <h2>People</h2>
-        <div class="group">
+        <h2 data-ui-view="staff,world,analytics,command">People</h2>
+        <div class="group" data-ui-view="staff" data-collapsible="true">
           <h3>Staff</h3>
           <div id="staffView" class="staff-list"></div>
           <button id="hireServerBtn">Hire Server</button>
@@ -261,24 +300,24 @@
           <button id="hireGuardBtn">Hire Guard</button>
         </div>
 
-        <div class="group">
+        <div class="group" data-ui-view="staff" data-collapsible="true" data-collapsed="true">
           <h3>Rota Presets</h3>
           <button id="rotaBalancedBtn">Balanced Rota</button>
           <button id="rotaDayBtn">Day Heavy Rota</button>
           <button id="rotaNightBtn">Night Heavy Rota</button>
         </div>
 
-        <div class="group">
+        <div class="group" data-ui-view="world,command" data-collapsible="true">
           <h3>World Influence</h3>
           <div id="worldActorsView" class="kv-list"></div>
         </div>
 
-        <div class="group">
+        <div class="group" data-ui-view="analytics,command" data-collapsible="true">
           <h3>Analytics Dashboard</h3>
           <div id="analyticsView" class="report-list compact"></div>
         </div>
 
-        <div class="group">
+        <div class="group" data-ui-view="analytics,world,command" data-collapsible="true">
           <h3>Scouting And Rumors</h3>
           <div id="scoutingView" class="report-list compact"></div>
         </div>

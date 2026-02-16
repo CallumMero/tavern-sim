@@ -446,6 +446,90 @@ Milestone 5 exit criteria:
 - [x] Campaign starts from selected location without UI/state desync.
 - [x] Settings screen exists, persists values, and does not regress gameplay systems.
 
+### Milestone 6: In-Game UI Clarity And Navigation
+
+- Reduce cognitive overload by grouping systems into clear, role-based screens
+- Introduce stronger information hierarchy so urgent items stand out and routine data stays readable
+- Use progressive disclosure so advanced controls/details are available but not always in the player’s face
+- Keep all M1-M5 functionality reachable with fewer on-screen elements at once
+
+Milestone 6 implementation steps:
+
+1. Run a current-state UI audit and workflow map:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - inventory every existing in-game panel/control and map it to player intent (`plan`, `operate`, `staff`, `world`, `analyze`, `respond`).
+   - classify each element by frequency and urgency (`always visible`, `contextual`, `advanced`).
+2. Define target information architecture for in-game screens:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - introduce primary in-game navigation with canonical views (for example: `Command`, `Operations`, `Staff`, `World`, `Analytics`, `Reports`).
+   - define ownership rules so each system appears in one primary home view (avoid duplicate panel sprawl).
+3. Implement in-game view routing state + persistence:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - add deterministic UI route state for current in-game tab/view.
+   - persist selected view and restore cleanly on reload without breaking simulation state.
+4. Build a compact command header (always-on overview):
+   - [x] Implementation complete
+   - [x] Validation complete
+   - keep only core live KPIs always visible (time/speed, gold, net trend, reputation, compliance, critical alerts count).
+   - move non-critical chips/details out of the permanent header into relevant screens.
+5. Refactor panel density using progressive disclosure:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - convert dense control blocks into collapsible sections with clear labels and defaults.
+   - keep high-frequency actions immediate; move advanced/rare actions behind expanders or subviews.
+6. Introduce alert prioritization and triage flow:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - unify urgent warnings, command-board critical messages, and blocking system states into a prioritized alert strip/queue.
+   - ensure each alert has a clear next action jump.
+7. Rework report/log consumption surfaces:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - separate `daily report`, `weekly summary`, and `raw log` into clearer sections with filters/search where useful.
+   - reduce repeated text noise and elevate deltas/changes since last day.
+8. Improve form and control ergonomics:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - standardize control order, button sizing, spacing, and labeling conventions across views.
+   - add helper microcopy/tooltips for non-obvious manager concepts.
+9. Tighten visual hierarchy and readability pass:
+   - [x] Implementation complete
+   - [x] Validation complete
+   - rebalance typography scale, contrast, spacing rhythm, and container framing for fast scanning.
+   - ensure the style remains consistent with the dark-wood medieval tavern identity.
+10. Ensure mobile and narrow-width layout usability:
+    - [x] Implementation complete
+    - [x] Validation complete
+    - design single-column or drawer-based behavior for smaller viewports.
+    - confirm no critical controls/panels become inaccessible or clipped.
+11. Add keyboard accessibility and navigation quality:
+    - [x] Implementation complete
+    - [x] Validation complete
+    - define predictable tab order per view, clear focus states, and shortcut-friendly navigation where appropriate.
+    - ensure view switching and core actions are keyboard-operable.
+12. Extend regression + browser smoke coverage for new UI shell:
+    - [x] Implementation complete
+    - [x] Validation complete
+    - add automated checks for routing integrity, alert visibility, and key action reachability across views.
+    - include desktop + mobile smoke pass that confirms no M1-M5/M4 functional regressions.
+13. Lock M6 -> M7 UI handoff contract:
+    - [x] Implementation complete
+    - [x] Validation complete
+    - expose stable UI route ids, panel mount points, and action hooks for future UX polish/features.
+    - ensure no bridge sprint is required before the next milestone builds on this interface.
+
+Milestone 6 exit criteria:
+
+- [x] In-game UI no longer presents the majority of systems on one overloaded screen by default.
+- [x] Core player loop actions are reachable in fewer, clearer steps with lower cognitive load.
+- [x] Alerts and priorities are visually distinct from routine information.
+- [x] Reports/logs are digestible and decision-oriented rather than a dense wall of text.
+- [x] Desktop and mobile layouts remain functional and readable for all core gameplay actions.
+- [x] Existing gameplay systems (M1-M5 + M4 tooling) remain fully functional after the UI restructure.
+
 ## Suggested Technical Direction
 
 - Keep core simulation in pure data modules (easy balancing + tests) [in progress via `src/engine/`]

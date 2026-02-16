@@ -695,7 +695,12 @@ function assertMenuShellContract() {
     "id=\"menuContinueBtn\"",
     "id=\"menuStartCampaignBtn\"",
     "id=\"menuDefaultSpeedSelect\"",
-    "id=\"appShell\""
+    "id=\"appShell\"",
+    "id=\"inGameNav\"",
+    "id=\"alertStrip\"",
+    "id=\"reportTabDailyBtn\"",
+    "id=\"reportTabWeeklyBtn\"",
+    "id=\"reportTabLogBtn\""
   ];
   requiredIndexTokens.forEach((token) => {
     if (!indexHtml.includes(token)) {
@@ -709,9 +714,106 @@ function assertMenuShellContract() {
   if (!gameUiSource.includes("setMenuView")) {
     throw new Error("menu shell contract missing menu routing in gameUI.js");
   }
+  if (!gameUiSource.includes("applyInGameView")) {
+    throw new Error("menu shell contract missing in-game route wiring in gameUI.js");
+  }
+  if (!gameUiSource.includes("renderAlertStrip")) {
+    throw new Error("menu shell contract missing alert strip rendering in gameUI.js");
+  }
+  if (!gameUiSource.includes("renderReportTabs")) {
+    throw new Error("menu shell contract missing report tab rendering in gameUI.js");
+  }
+  if (!gameUiSource.includes("setupGroupCollapsers")) {
+    throw new Error("menu shell contract missing progressive disclosure group collapsing in gameUI.js");
+  }
+  if (!gameUiSource.includes("event.altKey")) {
+    throw new Error("menu shell contract missing keyboard navigation hints in gameUI.js");
+  }
+  if (!startAppSource.includes("setUiView")) {
+    throw new Error("menu shell contract missing UI route debug hook in startApp.js");
+  }
   if (!settingsStoreSource.includes("DEFAULT_APP_SETTINGS")) {
     throw new Error("menu shell contract missing app settings defaults");
   }
+  if (!settingsStoreSource.includes("inGameView")) {
+    throw new Error("menu shell contract missing inGameView setting defaults");
+  }
+  if (!settingsStoreSource.includes("reportTab")) {
+    throw new Error("menu shell contract missing reportTab setting defaults");
+  }
+  if (!indexHtml.includes("data-ui-route=\"command\"") || !indexHtml.includes("data-ui-route=\"reports\"")) {
+    throw new Error("menu shell contract missing in-game route buttons in index.html");
+  }
+  if (!indexHtml.includes("data-ui-view=\"")) {
+    throw new Error("menu shell contract missing view-scoped panel attributes in index.html");
+  }
+}
+
+function assertUiSmokeCoverageContract() {
+  const smokeSource = readRepoFile("../../scripts/regression/m4BrowserSmoke.mjs");
+  const requiredSmokeTokens = [
+    "SMOKE: desktop route integrity",
+    "SMOKE: desktop alert triage",
+    "SMOKE: desktop key action reachability",
+    "SMOKE: mobile route reachability",
+    "viewport: { width: 1440, height: 900 }",
+    "viewport: { width: 390, height: 844 }",
+    "data-ui-alert-view",
+    "nextDayBtn",
+    "fileComplianceBtn",
+    "hireServerBtn",
+    "routeTo(page, routeId)",
+    "reachAndClick(page, \"world\", \"fileComplianceBtn\")",
+    "BROWSER_SMOKE_PASS"
+  ];
+  requiredSmokeTokens.forEach((token) => {
+    if (!smokeSource.includes(token)) {
+      throw new Error(`ui smoke contract missing coverage token: ${token}`);
+    }
+  });
+}
+
+function assertUiHandoffContract() {
+  const gameUiSource = readRepoFile("../../src/ui/gameUI.js");
+  const startAppSource = readRepoFile("../../src/runtime/startApp.js");
+  const smokeSource = readRepoFile("../../scripts/regression/m4BrowserSmoke.mjs");
+
+  const requiredGameUiTokens = [
+    "UI_HANDOFF_CONTRACT_VERSION",
+    "cloneUiHandoffContract",
+    "applyUiHandoffDomContract",
+    "panelMountPoints",
+    "actionHooks",
+    "data-ui-mount",
+    "data-ui-action-hook",
+    "handoffContract: () => cloneUiHandoffContract()",
+    "data-ui-route-id"
+  ];
+  requiredGameUiTokens.forEach((token) => {
+    if (!gameUiSource.includes(token)) {
+      throw new Error(`ui handoff contract missing token in gameUI.js: ${token}`);
+    }
+  });
+
+  const requiredStartAppTokens = [
+    "uiRoutes: () => ui.routeIds()",
+    "uiHandoff: () => ui.handoffContract()"
+  ];
+  requiredStartAppTokens.forEach((token) => {
+    if (!startAppSource.includes(token)) {
+      throw new Error(`ui handoff contract missing token in startApp.js: ${token}`);
+    }
+  });
+
+  const requiredSmokeTokens = [
+    "SMOKE: desktop handoff contract",
+    "uiHandoff"
+  ];
+  requiredSmokeTokens.forEach((token) => {
+    if (!smokeSource.includes(token)) {
+      throw new Error(`ui handoff contract missing smoke coverage token: ${token}`);
+    }
+  });
 }
 
 function runDebugStabilizationChecks(scenario) {
@@ -806,6 +908,8 @@ function runDebugStabilizationChecks(scenario) {
 
   assertNoLegacyGuildTerms();
   assertMenuShellContract();
+  assertUiSmokeCoverageContract();
+  assertUiHandoffContract();
 }
 
 function runHybridTimeflowChecks(scenario) {

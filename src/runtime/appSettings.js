@@ -4,7 +4,9 @@ const DEFAULT_APP_SETTINGS = Object.freeze({
   audioMode: "hearth_only",
   uiScale: "1",
   textSize: "default",
-  defaultSpeed: "0"
+  defaultSpeed: "0",
+  inGameView: "command",
+  reportTab: "daily"
 });
 
 function normalizeAppSettings(settings = null) {
@@ -17,12 +19,22 @@ function normalizeAppSettings(settings = null) {
   const defaultSpeed = ["0", "1", "2", "4"].includes(`${input.defaultSpeed}`)
     ? `${input.defaultSpeed}`
     : "0";
+  const inGameView = ["command", "operations", "staff", "world", "analytics", "reports"].includes(
+    `${input.inGameView}`
+  )
+    ? `${input.inGameView}`
+    : "command";
+  const reportTab = ["daily", "weekly", "log"].includes(`${input.reportTab}`)
+    ? `${input.reportTab}`
+    : "daily";
 
   return {
     audioMode,
     uiScale,
     textSize,
-    defaultSpeed
+    defaultSpeed,
+    inGameView,
+    reportTab
   };
 }
 
@@ -60,4 +72,3 @@ export function createAppSettingsStore(
     save
   };
 }
-
